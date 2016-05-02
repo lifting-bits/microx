@@ -1634,7 +1634,11 @@ static void ExecuteNative(void) {
     "pushq %23;"
     "popfq;"
 
+    "fnclex;"
     ".byte 0xff, 0x14, 0x24;"  // `CALL QWORD PTR [RSP]`.
+    "fwait;"
+    "fnclex;"
+
     "pushfq;"
     "popq %23;"
     "xchg %8, %%rax;"
@@ -1873,7 +1877,7 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
   }
 
   if (gUsesFPU && !this->WriteFPU(gFPU)) {
-    return ExecutorStatus::kErrorReadFPU;
+    return ExecutorStatus::kErrorWriteFPU;
   }
 
   if (!WriteRegisters(this)) {
