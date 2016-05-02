@@ -65,11 +65,9 @@ struct Memory final {
   bool write_back;
   xed_operand_enum_t op_name;
   xed_reg_enum_t segment_reg;
-  xed_reg_enum_t segment_base_reg;
   xed_reg_enum_t base_reg;
   xed_reg_enum_t index_reg;
 
-  uintptr_t segment_base;
   uintptr_t base;
   uintptr_t index;
   uintptr_t scale;
@@ -243,25 +241,11 @@ static bool ReadRegister(const Executor *executor, xed_reg_enum_t reg,
   return read;
 }
 
-// Return the segment base register value.
-static xed_reg_enum_t SegmentBaseReg(xed_reg_enum_t seg_reg) {
-  if (XED_REG_FS == seg_reg) {
-    return XED_REG_FSBASE;
-  } else if (XED_REG_GS == seg_reg) {
-    return XED_REG_GSBASE;
-  } else {
-    return XED_REG_INVALID;
-  }
-}
-
 // Read in register values associated with memory operands.
 static bool ReadRegistersMemOp(const Executor *executor, unsigned op_num) {
-  auto seg_reg = xed_decoded_inst_get_seg_reg(gXedd, op_num);
-  auto seg_base_reg = SegmentBaseReg(seg_reg);
   auto base_reg = xed_decoded_inst_get_base_reg(gXedd, op_num);
   auto index_reg = xed_decoded_inst_get_index_reg(gXedd, op_num);
-  return ReadRegister(executor, seg_base_reg, RegRequestHint::kNone) &&
-         ReadRegister(executor, base_reg, RegRequestHint::kMemoryBaseAddress) &&
+  return ReadRegister(executor, base_reg, RegRequestHint::kMemoryBaseAddress) &&
          ReadRegister(executor, index_reg, RegRequestHint::kMemoryIndexAddress);
 }
 
@@ -444,11 +428,18 @@ static bool ReadMemory(const Executor *executor,
   mem.write_back = xed_operand_written(xedo);
   mem.op_name = xed_operand_name(xedo);
   mem.segment_reg = xed_decoded_inst_get_seg_reg(gXedd, mem_index);
-  mem.segment_base_reg = SegmentBaseReg(mem.segment_reg);
   mem.base_reg = xed_decoded_inst_get_base_reg(gXedd, mem_index);
   mem.index_reg = xed_decoded_inst_get_index_reg(gXedd, mem_index);
-  mem.segment_base = ReadGPR(mem.segment_base_reg);
   mem.base = ReadGPR(mem.base_reg);
+
+  // Deduce the implicit segment register.
+  if (XED_REG_INVALID == mem.segment_reg) {
+    mem.segment_reg = XED_REG_DS;
+    if (XED_REG_RSP == xed_get_largest_enclosing_register(mem.base_reg) ||
+        XED_REG_RBP == xed_get_largest_enclosing_register(mem.base_reg)) {
+      mem.segment_reg = XED_REG_SS;
+    }
+  }
 
   // PC-relative memory accesses are relative to the next PC.
   if (XED_REG_EIP == mem.base_reg || XED_REG_RIP == mem.base_reg) {
@@ -550,7 +541,6 @@ static bool ReadMemory(const Executor *executor,
   }
 
   // Segment base might be wider than the address width.
-  mem.address += mem.segment_base;
   mem.size = 0;
 
   // Read in the data.
@@ -558,7 +548,8 @@ static bool ReadMemory(const Executor *executor,
 
   mem.size = 8 * xed_decoded_inst_get_memory_operand_length(gXedd, mem_index);
   return (XED_OPERAND_AGEN == mem.op_name) ||
-         executor->ReadMem(mem.address, mem.size, hint, mem.data);
+         executor->ReadMem(xed_reg_enum_t2str(mem.segment_reg),
+                           mem.address, mem.size, hint, mem.data);
 }
 
 // Read in memory from the executor.
@@ -596,7 +587,8 @@ static bool WriteMemory(const Executor *executor) {
     if (!mem.present || !mem.write_back) {
       continue;
     }
-    if (!executor->WriteMem(mem.address, mem.size, mem.data)) {
+    auto seg_name = xed_reg_enum_t2str(mem.segment_reg);
+    if (!executor->WriteMem(seg_name, mem.address, mem.size, mem.data)) {
       return false;
     }
   }

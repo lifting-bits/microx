@@ -30,10 +30,10 @@ struct PythonExecutor : public Executor {
   virtual bool WriteReg(const char *name, size_t size,
                         const Data &val) const override;
 
-  virtual bool ReadMem(uintptr_t addr, size_t size, MemRequestHint hint,
-                       Data &val) const override;
+  virtual bool ReadMem(const char *seg, uintptr_t addr, size_t size,
+                       MemRequestHint hint, Data &val) const override;
 
-  virtual bool WriteMem(uintptr_t addr, size_t size,
+  virtual bool WriteMem(const char *seg, uintptr_t addr, size_t size,
                         const Data &val) const override;
 
   virtual bool ReadFPU(FPU &val) const override;
@@ -229,10 +229,10 @@ bool PythonExecutor::WriteReg(const char *name, size_t size,
   return nullptr != ret;
 }
 
-bool PythonExecutor::ReadMem(uintptr_t addr, size_t size,
+bool PythonExecutor::ReadMem(const char *seg, uintptr_t addr, size_t size,
                              MemRequestHint hint, Data &val) const {
   auto res = PyEval_CallMethod(
-      self, "ReadMem", "(K,I,i)", addr, size / 8, hint);
+      self, "ReadMem", "(s,K,I,i)", seg, addr, size / 8, hint);
   if (res) {
     auto ret = ReadValue(res, size, val);
     Py_DECREF(res);
@@ -242,10 +242,10 @@ bool PythonExecutor::ReadMem(uintptr_t addr, size_t size,
   }
 }
 
-bool PythonExecutor::WriteMem(uintptr_t addr, size_t size,
+bool PythonExecutor::WriteMem(const char *seg, uintptr_t addr, size_t size,
                               const Data &val) const {
   auto ret = PyEval_CallMethod(
-      self, "WriteMem", "(K,s#)", addr, val.bytes, size / 8);
+      self, "WriteMem", "(s,K,s#)", seg, addr, val.bytes, size / 8);
   Py_XDECREF(ret);
   return nullptr != ret;
 }

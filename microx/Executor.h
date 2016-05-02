@@ -66,10 +66,10 @@ class Executor {
   virtual bool WriteReg(const char *name, size_t size,
                         const Data &val) const = 0;
 
-  virtual bool ReadMem(uintptr_t addr, size_t size, MemRequestHint hint,
-                       Data &val) const = 0;
+  virtual bool ReadMem(const char *seg, uintptr_t addr, size_t size,
+                       MemRequestHint hint, Data &val) const = 0;
 
-  virtual bool WriteMem(uintptr_t addr, size_t size,
+  virtual bool WriteMem(const char *seg, uintptr_t addr, size_t size,
                         const Data &val) const = 0;
 
   virtual bool ReadFPU(FPU &val) const = 0;
