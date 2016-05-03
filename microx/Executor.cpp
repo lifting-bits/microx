@@ -19,46 +19,6 @@ enum : size_t {
   kPageSize = 4096
 };
 
-// 32-bit decoded state.
-static const xed_state_t kXEDState32 = {
-    XED_MACHINE_MODE_LONG_COMPAT_32,
-    XED_ADDRESS_WIDTH_32b};
-
-// 64-bit decoded state.
-static const xed_state_t kXEDState64 = {
-    XED_MACHINE_MODE_LONG_64,
-    XED_ADDRESS_WIDTH_64b};
-
-// Decoded instructions.
-static xed_decoded_inst_t gXedd_;
-static xed_decoded_inst_t * const gXedd = &gXedd_;
-
-// High-level encoder info for the decoded instruction to be re-emitted.
-static xed_encoder_instruction_t gEmu;
-static unsigned gEmuSize = 0;
-
-// Region of executable code.
-static uint8_t gExecArea_[kPageSize * 2] = {0xCC};
-static uint8_t *gExecArea = nullptr;
-
-// Storage for register data.
-static std::bitset<XED_REG_LAST> gUsedRegs;
-static std::bitset<XED_REG_LAST> gModifiedRegs;
-static Data gRegs[XED_REG_LAST] = {{0}};
-static xed_reg_enum_t gStackPtrAlias = XED_REG_INVALID;
-
-static bool gUsesFPU = false;
-static FPU gFPU = {{0}};
-static FPU gNativeFPU = {{0}};
-
-static int gSignal = 0;
-static struct sigaction gSignalHandler;
-static struct sigaction gSIGILL;
-static struct sigaction gSIGSEGV;
-static struct sigaction gSIGBUS;
-static struct sigaction gSIGFPE;
-static sigjmp_buf gRecoveryTarget;
-
 // A memory value that is read by the executor.
 struct Memory final {
   bool present;
@@ -113,6 +73,143 @@ union Flags final {
   } __attribute__((packed));
 } __attribute__((packed));
 
+
+union FPUStatusWord final {
+  uint16_t flat;
+  struct {
+    uint16_t ie:1;  // bit 0
+    uint16_t de:1;
+    uint16_t ze:1;
+    uint16_t oe:1;
+    uint16_t ue:1;  // bit 4
+    uint16_t pe:1;
+    uint16_t sf:1;
+    uint16_t es:1;
+    uint16_t c0:1;  // bit 8
+    uint16_t c1:1;
+    uint16_t c2:1;
+    uint16_t top:3;
+    uint16_t c3:1;
+    uint16_t b:1;
+  } __attribute__((packed)) u;
+} __attribute__((packed));
+
+static_assert(2 == sizeof(FPUStatusWord),
+              "Invalid structure packing of `FPUFlags`.");
+
+union FPUControlWord final {
+  uint16_t flat;
+  struct {
+    uint16_t im:1;  // bit 0
+    uint16_t dm:1;
+    uint16_t zm:1;
+    uint16_t om:1;
+    uint16_t um:1;  // bit 4
+    uint16_t pm:1;
+    uint16_t _rsvd0:2;
+    uint16_t pc:2;  // bit 8
+    uint16_t rc:2;
+    uint16_t x:1;
+    uint16_t _rsvd1:3;
+  } __attribute__((packed)) u;
+} __attribute__((packed));
+
+static_assert(2 == sizeof(FPUControlWord),
+              "Invalid structure packing of `FPUControl`.");
+
+struct alignas(1) float80_t {
+  struct {
+    uint16_t sign:1;
+    uint16_t exponent:15;
+  } __attribute__((packed));
+  struct {
+    uint64_t integer:1;
+    uint64_t fraction:63;
+  } __attribute__((packed));
+} __attribute__((packed));
+
+static_assert(10 == sizeof(float80_t), "Invalid `float80_t` size.");
+
+struct FPUStackElem final {
+  uint8_t _rsvd[6];
+  union {
+    float80_t st;
+    struct {
+      uint16_t infinity;  // When an MMX register is used, this is all 1s.
+      uint64_t mmx;
+    } __attribute__((packed));
+  } __attribute__((packed));
+} __attribute__((packed));
+
+static_assert(16 == sizeof(FPUStackElem),
+              "Invalid structure packing of `FPUStackElem`.");
+
+union SSEControlStatus {
+  uint32_t flat;
+  struct {
+    uint32_t ie:1;  // Invalid operation.
+    uint32_t de:1;  // Denormal flag.
+    uint32_t ze:1;  // Divide by zero.
+    uint32_t oe:1;  // Overflow.
+    uint32_t ue:1;  // Underflow.
+    uint32_t pe:1;  // Precision.
+    uint32_t daz:1;  // Denormals are zero.
+    uint32_t im:1;  // Invalid operation.
+    uint32_t dm:1;  // Denormal mask.
+    uint32_t zm:1;  // Dvidide by zero mask.
+    uint32_t om:1;  // Overflow mask.
+    uint32_t um:1;  // Underflow mask.
+    uint32_t pm:1;  // Precision mask.
+    uint32_t rn:1;  // Round negative.
+    uint32_t rp:1;  // Round positive.
+    uint32_t fz:1;  // Flush to zero.
+    uint32_t _rsvd:16;
+  } __attribute__((packed));
+} __attribute__((packed));
+
+static_assert(4 == sizeof(SSEControlStatus),
+              "Invalid structure packing of `SSEControlStatus`.");
+
+struct alignas(16) XMMReg {
+  uint8_t data[16];
+};
+
+static_assert(16 == sizeof(XMMReg), "Invalid structure packing of `XMMReg`.");
+
+// FP register state that conforms with `FXSAVE`.
+struct alignas(64) X87 final {
+  FPUControlWord cwd;
+  FPUStatusWord swd;
+  uint8_t ftw;
+  uint8_t _rsvd0;
+  uint16_t fop;
+  union {
+    struct {
+      uint32_t ip;  // Offset in segment of last non-control FPU instruction.
+      uint16_t cs;  // Code segment associated with `ip`.
+      uint16_t _rsvd1;
+      uint32_t dp;
+      uint16_t ds;
+      uint16_t _rsvd2;
+    } __attribute__((packed)) x86;
+    struct {
+      uint64_t ip;
+      uint64_t dp;
+    } __attribute__((packed)) amd64;
+  } __attribute__((packed)) u;
+  SSEControlStatus mxcsr;
+  uint32_t mxcsr_mask;
+  FPUStackElem st[8];   // 8*16 bytes for each FP reg = 128 bytes.
+
+  // Note: This is consistent with `fxsave64`, but doesn't handle things like
+  //       ZMM/YMM registers. Therefore, we use a different set of registers
+  //       for those.
+  XMMReg xmm[16];  // 16*16 bytes for each XMM reg = 256 bytes.
+  uint32_t padding[24];
+} __attribute__((packed));
+
+static_assert(512 == sizeof(FPU), "Invalid structure packing of `FPU`.");
+
 // Scoped access to a mutex.
 class LockGuard {
  public:
@@ -126,6 +223,49 @@ class LockGuard {
  private:
   pthread_mutex_t *lock;
 };
+
+// 32-bit decoded state.
+static const xed_state_t kXEDState32 = {
+    XED_MACHINE_MODE_LONG_COMPAT_32,
+    XED_ADDRESS_WIDTH_32b};
+
+// 64-bit decoded state.
+static const xed_state_t kXEDState64 = {
+    XED_MACHINE_MODE_LONG_64,
+    XED_ADDRESS_WIDTH_64b};
+
+// Decoded instructions.
+static xed_decoded_inst_t gXedd_;
+static xed_decoded_inst_t * const gXedd = &gXedd_;
+
+// High-level encoder info for the decoded instruction to be re-emitted.
+static xed_encoder_instruction_t gEmu;
+static unsigned gEmuSize = 0;
+
+// Region of executable code.
+static uint8_t gExecArea_[kPageSize * 2] = {0xCC};
+static uint8_t *gExecArea = nullptr;
+
+// Storage for register data.
+static std::bitset<XED_REG_LAST> gUsedRegs;
+static std::bitset<XED_REG_LAST> gModifiedRegs;
+static Data gRegs[XED_REG_LAST] = {{0}};
+static xed_reg_enum_t gStackPtrAlias = XED_REG_INVALID;
+
+static bool gUsesFPU = false;
+static bool gUsesMMX = false;
+static union {
+  FPU opaque;
+  X87 x87;
+} gFPU, gNativeFPU;
+
+static int gSignal = 0;
+static struct sigaction gSignalHandler;
+static struct sigaction gSIGILL;
+static struct sigaction gSIGSEGV;
+static struct sigaction gSIGBUS;
+static struct sigaction gSIGFPE;
+static sigjmp_buf gRecoveryTarget;
 
 // Flags that must be written back.
 static Flags gWriteBackFlags;
@@ -205,12 +345,14 @@ static bool ReadRegister(const Executor *executor, xed_reg_enum_t reg,
 
   const auto reg_class = xed_reg_class(reg);
   if (XED_REG_CLASS_X87 == reg_class ||
-      XED_REG_CLASS_PSEUDOX87 == reg_class ||
-      XED_REG_CLASS_MMX == reg_class) {
-    if (!gUsesFPU) {
-      gUsesFPU = true;
-    }
+      XED_REG_CLASS_PSEUDOX87 == reg_class) {
+    gUsesFPU = true;
     return true;
+
+  // Mark the FPU as being used; we'll merge/split the MMX state manually.
+  } else if (XED_REG_CLASS_MMX == reg_class) {
+    gUsesFPU = true;
+    gUsesMMX = true;
   }
 
   // Stack operations.
@@ -779,7 +921,6 @@ static bool Emulate(const Executor *executor, uintptr_t &next_pc,
   const auto op_size_bytes = (gEmu.effective_operand_width / 8);
   const auto simm0 = GetSignedImmediate();
 
-  // TODO(pag): Use this when implement STRINGOP instructions.
   auto stringop_inc = static_cast<int64_t>(op_size_bytes);
   if (aflag.df) {
     stringop_inc = -stringop_inc;
@@ -1559,6 +1700,42 @@ static bool EncodeInstruction(const Executor *executor) {
   }
 }
 
+#define COPY_FROM_MMX(i) \
+  do { \
+    if (gUsedRegs.test(XED_REG_MMX ## i)) { \
+      memcpy(&(gFPU.x87.st[i].mmx), gRegs[XED_REG_MMX ## i].bytes, 8); \
+      gFPU.x87.st[i].infinity = static_cast<uint16_t>(~0U); \
+    } \
+  } while (0)
+
+#define COPY_TO_MMX(i) \
+  do { \
+    if (gUsedRegs.test(XED_REG_MMX ## i)) { \
+      memcpy(gRegs[XED_REG_MMX ## i].bytes, &(gFPU.x87.st[i].mmx), 8); \
+    } \
+  } while (0)
+
+static void CopyMMXStateToFPU(void) {
+  COPY_FROM_MMX(0);
+  COPY_FROM_MMX(1);
+  COPY_FROM_MMX(2);
+  COPY_FROM_MMX(3);
+  COPY_FROM_MMX(4);
+  COPY_FROM_MMX(5);
+  COPY_FROM_MMX(6);
+  COPY_FROM_MMX(7);
+}
+
+static void CopyMMXStateFromFPU(void) {
+  COPY_TO_MMX(0);
+  COPY_TO_MMX(1);
+  COPY_TO_MMX(2);
+  COPY_TO_MMX(3);
+  COPY_TO_MMX(4);
+  COPY_TO_MMX(5);
+  COPY_TO_MMX(6);
+  COPY_TO_MMX(7);
+}
 // Load in the FPU that will be emulated. This will save the native FPU just
 // in case it's got any special rounding modes or other settings going on.
 static void LoadFPU(const Executor *executor) {
@@ -1784,6 +1961,7 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
   gModifiedRegs.reset();
   gStackPtrAlias = XED_REG_INVALID;
   gUsesFPU = false;
+  gUsesMMX = false;
 
   // Get only the flags we need. This treats the individual flags as if they
   // are registers.
@@ -1797,8 +1975,12 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
 
   // Read in the FPU. We actually ignore the the embedded XMM registers
   // entirely.
-  if (gUsesFPU && !this->ReadFPU(gFPU)) {
+  if (gUsesFPU && !this->ReadFPU(gFPU.opaque)) {
     return ExecutorStatus::kErrorReadFPU;
+  }
+
+  if (gUsesMMX) {
+    CopyMMXStateToFPU();
   }
 
   // Read memory *after* reading in values of registers, so that we can figure
@@ -1876,8 +2058,12 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
     return ExecutorStatus::kErrorWriteFlags;
   }
 
-  if (gUsesFPU && !this->WriteFPU(gFPU)) {
+  if (gUsesFPU && !this->WriteFPU(gFPU.opaque)) {
     return ExecutorStatus::kErrorWriteFPU;
+  }
+
+  if (gUsesMMX) {
+    CopyMMXStateFromFPU();
   }
 
   if (!WriteRegisters(this)) {

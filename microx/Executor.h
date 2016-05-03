@@ -11,7 +11,7 @@ struct alignas(16) Data {
   uint8_t bytes[512 / 8];  // Largest register is 512 bits.
 };
 
-struct alignas(16) FPU {
+struct alignas(64) FPU {
   uint8_t bytes[512];  // X87 FPU needs 512 bytes of state.
 };
 
