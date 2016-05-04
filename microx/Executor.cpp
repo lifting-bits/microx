@@ -1845,14 +1845,14 @@ static void ExecuteNative(void) {
 
     "add $8, %%rsp;"
     :
-    : "m"(gRegs[XED_REG_YMM0]),
-      "m"(gRegs[XED_REG_YMM1]),
-      "m"(gRegs[XED_REG_YMM2]),
-      "m"(gRegs[XED_REG_YMM3]),
-      "m"(gRegs[XED_REG_YMM4]),
-      "m"(gRegs[XED_REG_YMM5]),
-      "m"(gRegs[XED_REG_YMM6]),
-      "m"(gRegs[XED_REG_YMM7]),
+    : "m"(gRegs[XED_REG_ZMM0]),
+      "m"(gRegs[XED_REG_ZMM1]),
+      "m"(gRegs[XED_REG_ZMM2]),
+      "m"(gRegs[XED_REG_ZMM3]),
+      "m"(gRegs[XED_REG_ZMM4]),
+      "m"(gRegs[XED_REG_ZMM5]),
+      "m"(gRegs[XED_REG_ZMM6]),
+      "m"(gRegs[XED_REG_ZMM7]),
       "m"(gRegs[XED_REG_RAX]),
       "m"(gRegs[XED_REG_RBX]),
       "m"(gRegs[XED_REG_RCX]),
