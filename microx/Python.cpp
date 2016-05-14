@@ -191,7 +191,7 @@ bool PythonExecutor::ReadValue(
 
   } else if (PyFloat_Check(res)) {
     if (32 == num_bits) {
-      WriteData(val, (float) PyFloat_AsDouble(res));
+      WriteData(val, static_cast<float>(PyFloat_AsDouble(res)));
     } else {
       WriteData(val, PyFloat_AsDouble(res));
     }

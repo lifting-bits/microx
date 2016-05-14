@@ -297,9 +297,6 @@ static bool DecodeInstruction(const uint8_t *bytes, size_t num_bytes,
     gEmu.effective_operand_width = xed_decoded_inst_get_operand_width(gXedd);
     gEmu.mode = kXEDState64;
 
-    if (gEmu.iclass == XED_ICLASS_UCOMISD){
-      asm("nop");
-    }
     return true;
   } else {
     return false;
@@ -494,8 +491,8 @@ void WriteGPR(xed_reg_enum_t reg, uintptr_t val) {
 }
 
 
-// Write the registers back to the executor. We conservatively write all
-// registers back, even
+// Write the registers back to the executor. We only write back ones that
+// may have been modified (W, *RW, *CW).
 static bool WriteRegisters(const Executor *executor) {
   if (XED_REG_INVALID != gStackPtrAlias) {
     WriteGPR(XED_REG_RSP, ReadGPR(gStackPtrAlias));
@@ -598,6 +595,9 @@ static bool ReadMemory(const Executor *executor,
   const auto op_size_bytes = gEmu.effective_operand_width / 8;
   if (0 == mem_index) {
     switch (iform) {
+
+      // For these, the memop is `[RSP]`, not `[RSP-N]` (which is what is
+      // actually modified), so adjust accordingly.
       case XED_IFORM_CALL_NEAR_RELBRz:
       case XED_IFORM_CALL_NEAR_RELBRd:
       case XED_IFORM_CALL_NEAR_GPRv:
@@ -627,7 +627,9 @@ static bool ReadMemory(const Executor *executor,
         break;
 
       // In the case of `BT*` instructions, the memory operand is really a base
-      // and the memory access itself can be very far away from the base.
+      // and the memory access itself can be very far away from the base. Figure
+      // out what memory address is actually accessed by taking into account
+      // what is being set/tested.
       case XED_IFORM_BT_MEMv_IMMb:
       case XED_IFORM_BT_MEMv_GPRv:
       case XED_IFORM_BTS_MEMv_IMMb:
@@ -650,6 +652,7 @@ static bool ReadMemory(const Executor *executor,
     }
   } else {
     switch (iform) {
+      // Same stack adjustment as above, just on a different memop.
       case XED_IFORM_CALL_NEAR_MEMv:
       case XED_IFORM_PUSH_MEMv:
         mem.displacement -= (gEmu.effective_operand_width / 8);
@@ -682,13 +685,10 @@ static bool ReadMemory(const Executor *executor,
     mem.address = static_cast<uint16_t>(mem.address);
   }
 
-  // Segment base might be wider than the address width.
-  mem.size = 0;
+  mem.size = 8 * xed_decoded_inst_get_memory_operand_length(gXedd, mem_index);
 
   // Read in the data.
   memset(mem.data.bytes, 0, sizeof(mem.data));
-
-  mem.size = 8 * xed_decoded_inst_get_memory_operand_length(gXedd, mem_index);
   return (XED_OPERAND_AGEN == mem.op_name) ||
          executor->ReadMem(xed_reg_enum_t2str(mem.segment_reg),
                            mem.address, mem.size, hint, mem.data);
@@ -1481,6 +1481,10 @@ static bool ReadFlags(const Executor *executor) {
   Flags aflag;
   aflag.flat = 0;
 
+  asm("pushfq;"
+      "pop %0;"
+      : "=m"(aflag.flat));
+
   Data flag_val = {{0}};
   READ_FLAG(cf, "CF")
   READ_FLAG(pf, "PF")
@@ -1741,19 +1745,17 @@ static void CopyMMXStateFromFPU(void) {
 static void LoadFPU(const Executor *executor) {
   if (!gUsesFPU) return;
   if (32 == executor->addr_size) {
-    asm(
-      ".byte 0x48; fxsave %0;"
-      "fxrstor %1;"
-      :
-      : "m"(gNativeFPU),
-        "m"(gFPU));
+    asm(".byte 0x48; fxsave %0;"
+        "fxrstor %1;"
+        :
+        : "m"(gNativeFPU),
+          "m"(gFPU));
   } else {
-    asm(
-      ".byte 0x48; fxsave %0;"
-      ".byte 0x48; fxrstor %1;"
-      :
-      : "m"(gNativeFPU),
-        "m"(gFPU));
+    asm(".byte 0x48; fxsave %0;"
+        ".byte 0x48; fxrstor %1;"
+        :
+        : "m"(gNativeFPU),
+          "m"(gFPU));
   }
 }
 
@@ -1762,115 +1764,127 @@ static void LoadFPU(const Executor *executor) {
 static void StoreFPU(const Executor *executor) {
   if (!gUsesFPU) return;
   if (32 == executor->addr_size) {
-    asm(
-      "fxsave %0;"
-      ".byte 0x48; fxrstor %1;"
-      :
-      : "m"(gFPU),
-        "m"(gNativeFPU));
+    asm("fxsave %0;"
+        ".byte 0x48; fxrstor %1;"
+        :
+        : "m"(gFPU),
+          "m"(gNativeFPU));
   } else {
-    asm(
-      ".byte 0x48; fxsave %0;"
-      ".byte 0x48; fxrstor %1;"
-      :
-      : "m"(gFPU),
-        "m"(gNativeFPU));
+    asm(".byte 0x48; fxsave %0;"
+        ".byte 0x48; fxrstor %1;"
+        :
+        : "m"(gFPU),
+          "m"(gNativeFPU));
   }
 }
 
 // Save and restore the native state, and execute the JITed instruction by
 // calling into the `gExecArea`.
 static void ExecuteNative(void) {
-  __asm__(
-    "push %24;"
 
-    "movdqu %0, %%xmm0;"
-    "movdqu %1, %%xmm1;"
-    "movdqu %2, %%xmm2;"
-    "movdqu %3, %%xmm3;"
-    "movdqu %4, %%xmm4;"
-    "movdqu %5, %%xmm5;"
-    "movdqu %6, %%xmm6;"
-    "movdqu %7, %%xmm7;"
+  // Need locals because GCC doesn't like having things with function calls
+  // in the `asm` constraint list.
+  //
+  // Note: XED does *not* return ZMM registers as the widest enclosing
+  //       version of XMM or YMM registers.
+  auto &XMM0 = gRegs[xed_get_largest_enclosing_register(XED_REG_XMM0)];
+  auto &XMM1 = gRegs[xed_get_largest_enclosing_register(XED_REG_XMM1)];
+  auto &XMM2 = gRegs[xed_get_largest_enclosing_register(XED_REG_XMM2)];
+  auto &XMM3 = gRegs[xed_get_largest_enclosing_register(XED_REG_XMM3)];
+  auto &XMM4 = gRegs[xed_get_largest_enclosing_register(XED_REG_XMM4)];
+  auto &XMM5 = gRegs[xed_get_largest_enclosing_register(XED_REG_XMM5)];
+  auto &XMM6 = gRegs[xed_get_largest_enclosing_register(XED_REG_XMM6)];
+  auto &XMM7 = gRegs[xed_get_largest_enclosing_register(XED_REG_XMM7)];
 
-    "xchg %8, %%rax;"
-    "xchg %9, %%rbx;"
-    "xchg %10, %%rcx;"
-    "xchg %11, %%rdx;"
-    "xchg %12, %%rbp;"
-    "xchg %13, %%rsi;"
-    "xchg %14, %%rdi;"
-    "xchg %15, %%r8;"
-    "xchg %16, %%r9;"
-    "xchg %17, %%r10;"
-    "xchg %18, %%r11;"
-    "xchg %19, %%r12;"
-    "xchg %20, %%r13;"
-    "xchg %21, %%r14;"
-    "xchg %22, %%r15;"
-    "pushq %23;"
-    "popfq;"
+  asm("push %24;"
 
-    "fnclex;"
-    ".byte 0xff, 0x14, 0x24;"  // `CALL QWORD PTR [RSP]`.
-    "fwait;"
-    "fnclex;"
+      "movdqu %0, %%xmm0;"
+      "movdqu %1, %%xmm1;"
+      "movdqu %2, %%xmm2;"
+      "movdqu %3, %%xmm3;"
+      "movdqu %4, %%xmm4;"
+      "movdqu %5, %%xmm5;"
+      "movdqu %6, %%xmm6;"
+      "movdqu %7, %%xmm7;"
 
-    "pushfq;"
-    "popq %23;"
-    "xchg %8, %%rax;"
-    "xchg %9, %%rbx;"
-    "xchg %10, %%rcx;"
-    "xchg %11, %%rdx;"
-    "xchg %12, %%rbp;"
-    "xchg %13, %%rsi;"
-    "xchg %14, %%rdi;"
-    "xchg %15, %%r8;"
-    "xchg %16, %%r9;"
-    "xchg %17, %%r10;"
-    "xchg %18, %%r11;"
-    "xchg %19, %%r12;"
-    "xchg %20, %%r13;"
-    "xchg %21, %%r14;"
-    "xchg %22, %%r15;"
+      "xchg %8, %%rax;"
+      "xchg %9, %%rbx;"
+      "xchg %10, %%rcx;"
+      "xchg %11, %%rdx;"
+      "xchg %12, %%rbp;"
+      "xchg %13, %%rsi;"
+      "xchg %14, %%rdi;"
+      "xchg %15, %%r8;"
+      "xchg %16, %%r9;"
+      "xchg %17, %%r10;"
+      "xchg %18, %%r11;"
+      "xchg %19, %%r12;"
+      "xchg %20, %%r13;"
+      "xchg %21, %%r14;"
+      "xchg %22, %%r15;"
 
-    "movdqu %%xmm7, %7;"
-    "movdqu %%xmm6, %6;"
-    "movdqu %%xmm5, %5;"
-    "movdqu %%xmm4, %4;"
-    "movdqu %%xmm3, %3;"
-    "movdqu %%xmm2, %2;"
-    "movdqu %%xmm1, %1;"
-    "movdqu %%xmm0, %0;"
+      "pushq %23;"
+      "popfq;"
 
-    "add $8, %%rsp;"
-    :
-    : "m"(gRegs[XED_REG_ZMM0]),
-      "m"(gRegs[XED_REG_ZMM1]),
-      "m"(gRegs[XED_REG_ZMM2]),
-      "m"(gRegs[XED_REG_ZMM3]),
-      "m"(gRegs[XED_REG_ZMM4]),
-      "m"(gRegs[XED_REG_ZMM5]),
-      "m"(gRegs[XED_REG_ZMM6]),
-      "m"(gRegs[XED_REG_ZMM7]),
-      "m"(gRegs[XED_REG_RAX]),
-      "m"(gRegs[XED_REG_RBX]),
-      "m"(gRegs[XED_REG_RCX]),
-      "m"(gRegs[XED_REG_RDX]),
-      "m"(gRegs[XED_REG_RBP]),
-      "m"(gRegs[XED_REG_RSI]),
-      "m"(gRegs[XED_REG_RDI]),
-      "m"(gRegs[XED_REG_R8]),
-      "m"(gRegs[XED_REG_R9]),
-      "m"(gRegs[XED_REG_R10]),
-      "m"(gRegs[XED_REG_R11]),
-      "m"(gRegs[XED_REG_R12]),
-      "m"(gRegs[XED_REG_R13]),
-      "m"(gRegs[XED_REG_R14]),
-      "m"(gRegs[XED_REG_R15]),
-      "m"(gRegs[XED_REG_RFLAGS]),
-      "r"(reinterpret_cast<uintptr_t>(gExecArea))
-  );
+      "fnclex;"
+      ".byte 0xff, 0x14, 0x24;"  // `CALL QWORD PTR [RSP]`.
+      "fwait;"
+      "fnclex;"
+
+      "pushfq;"
+      "popq %23;"
+      "xchg %8, %%rax;"
+      "xchg %9, %%rbx;"
+      "xchg %10, %%rcx;"
+      "xchg %11, %%rdx;"
+      "xchg %12, %%rbp;"
+      "xchg %13, %%rsi;"
+      "xchg %14, %%rdi;"
+      "xchg %15, %%r8;"
+      "xchg %16, %%r9;"
+      "xchg %17, %%r10;"
+      "xchg %18, %%r11;"
+      "xchg %19, %%r12;"
+      "xchg %20, %%r13;"
+      "xchg %21, %%r14;"
+      "xchg %22, %%r15;"
+
+      "movdqu %%xmm0, %0;"
+      "movdqu %%xmm1, %1;"
+      "movdqu %%xmm2, %2;"
+      "movdqu %%xmm3, %3;"
+      "movdqu %%xmm4, %4;"
+      "movdqu %%xmm5, %5;"
+      "movdqu %%xmm6, %6;"
+      "movdqu %%xmm7, %7;"
+
+      "add $8, %%rsp;"
+      :
+      : "m"(XMM0),
+        "m"(XMM1),
+        "m"(XMM2),
+        "m"(XMM3),
+        "m"(XMM4),
+        "m"(XMM5),
+        "m"(XMM6),
+        "m"(XMM7),
+        "m"(gRegs[XED_REG_RAX]),
+        "m"(gRegs[XED_REG_RBX]),
+        "m"(gRegs[XED_REG_RCX]),
+        "m"(gRegs[XED_REG_RDX]),
+        "m"(gRegs[XED_REG_RBP]),
+        "m"(gRegs[XED_REG_RSI]),
+        "m"(gRegs[XED_REG_RDI]),
+        "m"(gRegs[XED_REG_R8]),
+        "m"(gRegs[XED_REG_R9]),
+        "m"(gRegs[XED_REG_R10]),
+        "m"(gRegs[XED_REG_R11]),
+        "m"(gRegs[XED_REG_R12]),
+        "m"(gRegs[XED_REG_R13]),
+        "m"(gRegs[XED_REG_R14]),
+        "m"(gRegs[XED_REG_R15]),
+        "m"(gRegs[XED_REG_RFLAGS]),
+        "g"(reinterpret_cast<uintptr_t>(gExecArea)));
 }
 
 static void ExecuteNativeAVX(void) {
@@ -2005,12 +2019,12 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
       return ExecutorStatus::kErrorExecute;
     } else {
       gSignal = 0;
-      LoadFPU(this);
       sigaction(SIGILL, &gSignalHandler, &gSIGILL);
       sigaction(SIGBUS, &gSignalHandler, &gSIGBUS);
       sigaction(SIGSEGV, &gSignalHandler, &gSIGSEGV);
       sigaction(SIGFPE, &gSignalHandler, &gSIGFPE);
 
+      LoadFPU(this);
       if (!sigsetjmp(gRecoveryTarget, true)) {
         if (has_avx512) {
           ExecuteNativeAVX512();
@@ -2020,12 +2034,12 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
           ExecuteNative();
         }
       }
+      StoreFPU(this);
 
       sigaction(SIGILL, &gSIGILL, nullptr);
       sigaction(SIGBUS, &gSIGBUS, nullptr);
       sigaction(SIGSEGV, &gSIGSEGV, nullptr);
       sigaction(SIGFPE, &gSIGFPE, nullptr);
-      StoreFPU(this);
     }
     switch (gSignal) {
       case 0:
