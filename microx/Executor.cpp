@@ -249,6 +249,7 @@ static uint8_t *gExecArea = nullptr;
 // Storage for register data.
 static std::bitset<XED_REG_LAST> gUsedRegs;
 static std::bitset<XED_REG_LAST> gModifiedRegs;
+static std::bitset<XED_REG_LAST> gStoreRegs;
 static Data gRegs[XED_REG_LAST] = {{0}};
 static xed_reg_enum_t gStackPtrAlias = XED_REG_INVALID;
 
@@ -372,10 +373,12 @@ static bool ReadRegister(const Executor *executor, xed_reg_enum_t reg,
 
   auto name = xed_reg_enum_t2str(widest_reg);
   auto size = xed_get_register_width_bits64(widest_reg);
-  auto &data = gRegs[xed_get_largest_enclosing_register(reg)];
+  auto store_reg = xed_get_largest_enclosing_register(reg);
+  auto &data = gRegs[store_reg];
   memset(data.bytes, 0, size / 8);
   auto read = executor->ReadReg(name, size, hint, data);
   gUsedRegs.set(widest_reg);
+  gStoreRegs.set(store_reg);
 
   return read;
 }
@@ -1558,13 +1561,13 @@ static xed_reg_enum_t GetStackPointerAlias(xed_reg_enum_t reg) {
   // Need to create an alias: these four registers are the most generally
   // usable, and we expect at least one of them to be free.
   if (XED_REG_INVALID == gStackPtrAlias) {
-    if (!gUsedRegs.test(XED_REG_RAX)) {
+    if (!gStoreRegs.test(XED_REG_RAX)) {
       gStackPtrAlias = XED_REG_RAX;
-    } else if (!gUsedRegs.test(XED_REG_RCX)) {
+    } else if (!gStoreRegs.test(XED_REG_RCX)) {
       gStackPtrAlias = XED_REG_RCX;
-    } else if (!gUsedRegs.test(XED_REG_RDX)) {
+    } else if (!gStoreRegs.test(XED_REG_RDX)) {
       gStackPtrAlias = XED_REG_RDX;
-    } else if (!gUsedRegs.test(XED_REG_RBX)) {
+    } else if (!gStoreRegs.test(XED_REG_RBX)) {
       gStackPtrAlias = XED_REG_RBX;
     } else {
       gStackPtrAlias = XED_REG_INVALID;  // Uh oh.
@@ -1973,6 +1976,7 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
 
   gUsedRegs.reset();
   gModifiedRegs.reset();
+  gStoreRegs.reset();
   gStackPtrAlias = XED_REG_INVALID;
   gUsesFPU = false;
   gUsesMMX = false;
