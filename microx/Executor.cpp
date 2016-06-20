@@ -1965,7 +1965,8 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
   auto emulation_status = ExecutorStatus::kGood;
   auto next_pc = GetNextPC(this);
 
-  if (XED_CATEGORY_NOP != xed_decoded_inst_get_category(gXedd)) {
+  if (XED_CATEGORY_NOP != xed_decoded_inst_get_category(gXedd) &&
+      XED_CATEGORY_WIDENOP != xed_decoded_inst_get_category(gXedd)) {
 
     // Read in the FPU. We actually ignore the the embedded XMM registers
     // entirely.
