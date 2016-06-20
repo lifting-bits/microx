@@ -930,35 +930,6 @@ static bool Emulate(const Executor *executor, uintptr_t &next_pc,
   }
 
   switch (xed_decoded_inst_get_iform_enum(gXedd)) {
-    case XED_IFORM_NOP_GPRv_0F18r0:
-    case XED_IFORM_NOP_GPRv_0F18r1:
-    case XED_IFORM_NOP_GPRv_0F18r2:
-    case XED_IFORM_NOP_GPRv_0F18r3:
-    case XED_IFORM_NOP_MEMv_0F18r4:
-    case XED_IFORM_NOP_GPRv_0F18r4:
-    case XED_IFORM_NOP_MEMv_0F18r5:
-    case XED_IFORM_NOP_GPRv_0F18r5:
-    case XED_IFORM_NOP_MEMv_0F18r6:
-    case XED_IFORM_NOP_GPRv_0F18r6:
-    case XED_IFORM_NOP_MEMv_0F18r7:
-    case XED_IFORM_NOP_GPRv_0F18r7:
-    case XED_IFORM_NOP_MEMv_GPRv_0F19:
-    case XED_IFORM_NOP_GPRv_GPRv_0F19:
-    case XED_IFORM_NOP_MEMv_GPRv_0F1C:
-    case XED_IFORM_NOP_GPRv_GPRv_0F1C:
-    case XED_IFORM_NOP_MEMv_GPRv_0F1D:
-    case XED_IFORM_NOP_GPRv_GPRv_0F1D:
-    case XED_IFORM_NOP_MEMv_GPRv_0F1E:
-    case XED_IFORM_NOP_GPRv_GPRv_0F1E:
-    case XED_IFORM_NOP_MEMv_GPRv_0F1F:
-    case XED_IFORM_NOP_GPRv_GPRv_0F1F:
-    case XED_IFORM_NOP_90:
-    case XED_IFORM_NOP_GPRv_GPRv_0F0D:
-    case XED_IFORM_NOP_GPRv_GPRv_0F1A:
-    case XED_IFORM_NOP_GPRv_GPRv_0F1B:
-    case XED_IFORM_NOP_GPRv_MEMv_0F1A:
-    case XED_IFORM_NOP_GPRv_MEM_0F1B:
-      return true;
 
     case XED_IFORM_LEA_GPRv_AGEN:
       WriteGPR(reg0, gMemory[0].address);
@@ -1991,82 +1962,94 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
     return ExecutorStatus::kErrorReadReg;
   }
 
-  // Read in the FPU. We actually ignore the the embedded XMM registers
-  // entirely.
-  if (gUsesFPU && !this->ReadFPU(gFPU.opaque)) {
-    return ExecutorStatus::kErrorReadFPU;
-  }
-
-  if (gUsesMMX) {
-    CopyMMXStateToFPU();
-  }
-
-  // Read memory *after* reading in values of registers, so that we can figure
-  // out all the memory addresses to be read.
-  if (!ReadMemory(this)) {
-    return ExecutorStatus::kErrorReadMem;
-  }
-
-  // Try to figure out what the target PC of the instruction is. If this
-  // is a control-flow instruction then the target PC is the target of
-  // the control-flow, otherwise it's just `next_pc`.
-  //
-  // Note:  This might determine that we shouldn't execute the instruction.
-  //        This will happen if figuring out the next/target program counter
-  //        requires us to emulate the instruction.
   auto emulation_status = ExecutorStatus::kGood;
   auto next_pc = GetNextPC(this);
-  if (!Emulate(this, next_pc, emulation_status)) {
-    if (ExecutorStatus::kGood != emulation_status) {
-      return emulation_status;
-    } else if (!EncodeInstruction(this)) {
-      return ExecutorStatus::kErrorExecute;
-    } else {
-      gSignal = 0;
-      sigaction(SIGILL, &gSignalHandler, &gSIGILL);
-      sigaction(SIGBUS, &gSignalHandler, &gSIGBUS);
-      sigaction(SIGSEGV, &gSignalHandler, &gSIGSEGV);
-      sigaction(SIGFPE, &gSignalHandler, &gSIGFPE);
 
-      LoadFPU(this);
-      if (!sigsetjmp(gRecoveryTarget, true)) {
-        if (has_avx512) {
-          ExecuteNativeAVX512();
-        } else if (has_avx) {
-          ExecuteNativeAVX();
-        } else {
-          ExecuteNative();
-        }
-      }
-      StoreFPU(this);
+  if (XED_CATEGORY_NOP != xed_decoded_inst_get_category(gXedd)) {
 
-      sigaction(SIGILL, &gSIGILL, nullptr);
-      sigaction(SIGBUS, &gSIGBUS, nullptr);
-      sigaction(SIGSEGV, &gSIGSEGV, nullptr);
-      sigaction(SIGFPE, &gSIGFPE, nullptr);
+    // Read in the FPU. We actually ignore the the embedded XMM registers
+    // entirely.
+    if (gUsesFPU && !this->ReadFPU(gFPU.opaque)) {
+      return ExecutorStatus::kErrorReadFPU;
     }
-    switch (gSignal) {
-      case 0:
-        break;  // All good :-D
 
-      case SIGSEGV:
-      case SIGBUS:
-        return ExecutorStatus::kErrorFault;
+    if (gUsesMMX) {
+      CopyMMXStateToFPU();
+    }
 
-      case SIGFPE:
-        return ExecutorStatus::kErrorFloatingPointException;
+    // Read memory *after* reading in values of registers, so that we can
+    // figure out all the memory addresses to be read.
+    if (!ReadMemory(this)) {
+      return ExecutorStatus::kErrorReadMem;
+    }
 
-      case SIGILL:
-      default:
+    // Try to figure out what the target PC of the instruction is. If this
+    // is a control-flow instruction then the target PC is the target of
+    // the control-flow, otherwise it's just `next_pc`.
+    //
+    // Note:  This might determine that we shouldn't execute the instruction.
+    //        This will happen if figuring out the next/target program counter
+    //        requires us to emulate the instruction.
+    if (!Emulate(this, next_pc, emulation_status)) {
+      if (ExecutorStatus::kGood != emulation_status) {
+        return emulation_status;
+      } else if (!EncodeInstruction(this)) {
         return ExecutorStatus::kErrorExecute;
-    }
-  }
+      } else {
+        gSignal = 0;
+        sigaction(SIGILL, &gSignalHandler, &gSIGILL);
+        sigaction(SIGBUS, &gSignalHandler, &gSIGBUS);
+        sigaction(SIGSEGV, &gSignalHandler, &gSIGSEGV);
+        sigaction(SIGFPE, &gSignalHandler, &gSIGFPE);
 
-  // Done before writing back the registers so that a failure of the
-  // instruction leaves no side-effects (on memory). This generally assumes
-  // that writing registers can't fail.
-  if (!WriteMemory(this)) {
-    return ExecutorStatus::kErrorWriteMem;
+        LoadFPU(this);
+        if (!sigsetjmp(gRecoveryTarget, true)) {
+          if (has_avx512) {
+            ExecuteNativeAVX512();
+          } else if (has_avx) {
+            ExecuteNativeAVX();
+          } else {
+            ExecuteNative();
+          }
+        }
+        StoreFPU(this);
+
+        sigaction(SIGILL, &gSIGILL, nullptr);
+        sigaction(SIGBUS, &gSIGBUS, nullptr);
+        sigaction(SIGSEGV, &gSIGSEGV, nullptr);
+        sigaction(SIGFPE, &gSIGFPE, nullptr);
+      }
+      switch (gSignal) {
+        case 0:
+          break;  // All good :-D
+
+        case SIGSEGV:
+        case SIGBUS:
+          return ExecutorStatus::kErrorFault;
+
+        case SIGFPE:
+          return ExecutorStatus::kErrorFloatingPointException;
+
+        case SIGILL:
+        default:
+          return ExecutorStatus::kErrorExecute;
+      }
+    }
+
+    // Done before writing back the registers so that a failure of the
+    // instruction leaves no side-effects (on memory). This generally assumes
+    // that writing registers can't fail.
+    if (!WriteMemory(this)) {
+      return ExecutorStatus::kErrorWriteMem;
+    }
+
+    if (gUsesFPU && !this->WriteFPU(gFPU.opaque)) {
+      return ExecutorStatus::kErrorWriteFPU;
+    }
+
+    if (gUsesMMX) {
+      CopyMMXStateFromFPU();
+    }
   }
 
   // Write back any registers that were read or written.
@@ -2074,14 +2057,6 @@ ExecutorStatus Executor::Execute(const uint8_t *bytes, size_t num_bytes) {
 
   if (!WriteFlags(this)) {
     return ExecutorStatus::kErrorWriteFlags;
-  }
-
-  if (gUsesFPU && !this->WriteFPU(gFPU.opaque)) {
-    return ExecutorStatus::kErrorWriteFPU;
-  }
-
-  if (gUsesMMX) {
-    CopyMMXStateFromFPU();
   }
 
   if (!WriteRegisters(this)) {
