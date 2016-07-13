@@ -112,7 +112,7 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
 
     case ExecutorStatus::kErrorFault:
       PyErr_SetString(
-          PyExc_MemoryError,
+          PyExc_RuntimeError,
           "Instruction faulted during micro-execution.");
       return nullptr;
 
