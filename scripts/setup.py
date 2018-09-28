@@ -21,7 +21,7 @@ microx = distutils.core.Extension(
 
 distutils.core.setup(
     name="microx",
-    version="0.1",
+    version="0.2",
     description="x86 and x86_64 micro-executor.",
     author="Peter Goodman",
     author_email="peter@trailofbits.com",

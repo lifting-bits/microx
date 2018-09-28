@@ -1,4 +1,20 @@
-/* Copyright 2016 Peter Goodman (peter@trailofbits.com), all rights reserved. */
+/*
+ * Copyright (c) 2018 Trail of Bits, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#define _XOPEN_SOURCE 1
 
 #include <bitset>
 #include <cstring>
@@ -446,7 +462,7 @@ static T ReadValue(xed_reg_enum_t reg) {
 uintptr_t ReadGPR(xed_reg_enum_t reg) {
   auto size = xed_get_register_width_bits64(reg);
   uintptr_t shift = 0;
-  if (XED_REG_GPR8H_FIRST <= reg && reg <= XED_REG_GPR8H_LAST) {
+  if (XED_REG_GPR8h_FIRST <= reg && reg <= XED_REG_GPR8h_LAST) {
     shift = 8;
     size = 16;
   }
@@ -480,7 +496,7 @@ void WriteGPR(xed_reg_enum_t reg, uintptr_t val) {
       WriteValue<uint16_t>(reg, val);
       break;
     case 8:
-      if (XED_REG_GPR8H_FIRST <= reg && reg <= XED_REG_GPR8H_LAST) {
+      if (XED_REG_GPR8h_FIRST <= reg && reg <= XED_REG_GPR8h_LAST) {
         auto whole_val = ReadValue<uint64_t>(reg);
         whole_val &= ~0xFF00;
         whole_val |= ((val & 0xFFU) << 8);
@@ -1285,7 +1301,7 @@ static bool Emulate(const Executor *executor, uintptr_t &next_pc,
       return true;
 
     case XED_IFORM_POP_GPRv_8F:
-    case XED_IFORM_POP_GPRv_51:
+    case XED_IFORM_POP_GPRv_58:
       WriteGPR(reg0, mem0);
       WriteGPR(stack_reg, ReadGPR(stack_reg) + op_size_bytes);
       return true;
@@ -1408,7 +1424,7 @@ static bool UsesUnsupportedFeatures(const Executor *executor) {
     case XED_CATEGORY_AVX2GATHER:
       return !executor->has_avx || UsesUnsupportedAttributes();
     case XED_CATEGORY_AVX512:
-    case XED_CATEGORY_AVX512VBMI:
+    case XED_CATEGORY_AVX512_VBMI:
       return !executor->has_avx512 || UsesUnsupportedAttributes();
     default:
       return UsesUnsupportedAttributes();
