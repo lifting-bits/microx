@@ -31,9 +31,8 @@ function fix_library()
 
 function download_and_extract_xed()
 {
-    sub_category "Downloading and installing XED."
     pushd $DIR/third_party/src
-    if [[ -e xed ]] ; then
+    if [[ ! -e xed ]] ; then
         git clone --depth 1 --single-branch --branch master git@github.com:intelxed/xed.git
     else
         pushd xed
@@ -41,7 +40,7 @@ function download_and_extract_xed()
         popd
     fi;
 
-    if [[ -e mbuild ]] ; then
+    if [[ ! -e mbuild ]] ; then
         git clone --depth 1 --single-branch --branch master git@github.com:intelxed/mbuild.git
     else
         pushd mbuild
@@ -53,7 +52,6 @@ function download_and_extract_xed()
     python ./mfile.py install
     mkdir -p $DIR/third_party/include/intel
     
-
     if [[ -e ./kits/${XED_VERSION}/lib/libxed.a ]] ; then
         LIB_EXT=a
     elif [[ -e ./kits/${XED_VERSION}/lib/libxed.so ]] ; then

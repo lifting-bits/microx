@@ -11,4 +11,4 @@ The following lists some use-cases of microx:
 
 Microx uses a combination of JIT-based dynamic binary translation and instruction emulation in order to safely execute x86 instructions. It is a 64-bit library, but it can execute 32-bit instructions that are not supported on 64-bit platforms. It can be easily embedded, as it performs no dynamic memory allocations, and is re-entrant.
 
-Microx depends on [Intel's XED](https://intelxed.github.io/) instruction encoder and decoder. A binary blob is embedded in this repository, though XED is open-source.
+Microx depends on [Intel's XED](https://intelxed.github.io/) instruction encoder and decoder.
