@@ -49,7 +49,7 @@ function download_and_extract_xed()
     fi;
 
     pushd xed
-    python ./mfile.py install
+    python ./mfile.py install --extra-flags=-fPIC
     mkdir -p $DIR/third_party/include/intel
     
     if [[ -e ./kits/${XED_VERSION}/lib/libxed.a ]] ; then
