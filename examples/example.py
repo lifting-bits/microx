@@ -274,7 +274,6 @@ class Thread(object):
     return self._regs[reg_name]
 
   def write_register(self, reg_name, value):
-    sys.stdout.write("Writing register: {} = {:x}\n".format(reg_name, value))
     self._regs[reg_name] = value
 
   def read_fpu(self):
