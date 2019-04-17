@@ -1962,6 +1962,13 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
   for (size_t num_executed = 0; num_executed < max_num_executions;
       ++num_executed) {
 
+    gUsedRegs.reset();
+    gModifiedRegs.reset();
+    gStoreRegs.reset();
+    gStackPtrAlias = XED_REG_INVALID;
+    gUsesFPU = false;
+    gUsesMMX = false;
+
     if (!ReadPC(this)) {
       return ExecutorStatus::kErrorReadReg;
     }
@@ -1979,13 +1986,6 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
     if (UsesUnsupportedFeatures(this)) {
       return ExecutorStatus::kErrorExecute;
     }
-
-    gUsedRegs.reset();
-    gModifiedRegs.reset();
-    gStoreRegs.reset();
-    gStackPtrAlias = XED_REG_INVALID;
-    gUsesFPU = false;
-    gUsesMMX = false;
 
     // Get only the flags we need. This treats the individual flags as if they
     // are registers.
