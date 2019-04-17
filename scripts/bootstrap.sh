@@ -47,9 +47,17 @@ function download_and_extract_xed()
         git pull origin master
         popd
     fi;
-
+    
+    if [[ "x${CC}x" = "xx" ]] ; then
+        export CC=`which cc`
+    fi;
+    
+    if [[ "x${CXX}x" = "xx" ]] ; then
+        export CXX=`which c++`
+    fi;
+    
     pushd xed
-    python ./mfile.py install --extra-flags=-fPIC --static
+    python ./mfile.py install --extra-flags=-fPIC --static "--cc=${CC}" "--cxx=${CXX}"
     mkdir -p $DIR/third_party/include/intel
     
     if [[ -e ./kits/${XED_VERSION}/lib/libxed.a ]] ; then
