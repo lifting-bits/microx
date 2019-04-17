@@ -43,6 +43,7 @@ enum class ExecutorStatus {
   kErrorReadReg,
   kErrorWriteReg,
   kErrorReadMem,
+  kErrorReadInstMem,
   kErrorWriteMem,
   kErrorReadFPU,
   kErrorWriteFPU
@@ -60,6 +61,7 @@ enum class RegRequestHint {
 
 enum class MemRequestHint {
   kReadOnly,
+  kReadExecutable,
   kWriteOnly,
   kReadWrite
 };
@@ -72,7 +74,7 @@ class Executor {
 
   static bool Init(void);
 
-  ExecutorStatus Execute(const uint8_t *bytes, size_t num_bytes);
+  ExecutorStatus Execute(size_t max_num_executions=1);
 
   virtual bool ReadReg(const char *name, size_t size, RegRequestHint hint,
                        Data &val) const = 0;

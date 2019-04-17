@@ -91,24 +91,16 @@ static int Executor_init(PyObject *self_, PyObject *args, PyObject *) {
 
 // Emulate an instruction.
 static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
-  uint8_t *instr_bytes = 0;
-  uint32_t instr_num_bytes = 0;
+  size_t num_execs = 0;
 
-  if (!PyArg_ParseTuple(args, "s#", &instr_bytes, &instr_num_bytes)) {
-    return nullptr;
-  }
-
-  if (!instr_num_bytes) {
-    PyErr_SetString(
-        PyExc_ValueError,
-        "Cannot micro-execute a zero-byte instruction.");
+  if (!PyArg_ParseTuple(args, "n", &num_execs)) {
     return nullptr;
   }
 
   auto self = reinterpret_cast<PythonExecutorObject *>(self_);
 
   self->executor->error = nullptr;
-  switch (self->executor->Execute(instr_bytes, instr_num_bytes)) {
+  switch (self->executor->Execute(num_execs)) {
     case ExecutorStatus::kGood:
       break;
 
