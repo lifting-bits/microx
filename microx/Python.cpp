@@ -15,6 +15,7 @@
  */
 
 #include <algorithm>
+#include <cinttypes>
 #include <cstdint>
 #include <new>
 #include <type_traits>
@@ -39,7 +40,8 @@ struct PythonExecutor : public Executor {
 
   virtual ~PythonExecutor(void);
 
-  bool ReadValue(PyObject *res, size_t num_bits, Data &val) const;
+  bool ReadValue(PyObject *res, size_t num_bits, Data &val,
+                 const char *usage) const;
 
   virtual bool ReadReg(const char *name, size_t size, RegRequestHint hint,
                        Data &val) const override;
@@ -59,7 +61,7 @@ struct PythonExecutor : public Executor {
 
   PyObject * const self;
   mutable PyObject *error;
-  mutable char error_message[256];
+  mutable char error_message[512];
 };
 
 // Python representation for an instance of an executor.
@@ -93,14 +95,17 @@ static int Executor_init(PyObject *self_, PyObject *args, PyObject *) {
 static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
   size_t num_execs = 0;
 
-  if (!PyArg_ParseTuple(args, "n", &num_execs)) {
+  if (!PyArg_ParseTuple(args, "K", &num_execs)) {
+    PyErr_SetString(
+        PyExc_TypeError,
+        "Invalid value passed to 'execute' method.");
     return nullptr;
   }
 
   auto self = reinterpret_cast<PythonExecutorObject *>(self_);
 
   self->executor->error = nullptr;
-  switch (self->executor->Execute(num_execs)) {
+  switch (auto error_code = self->executor->Execute(num_execs)) {
     case ExecutorStatus::kGood:
       break;
 
@@ -131,10 +136,24 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
           "Instruction faulted during micro-execution.");
       return nullptr;
 
+    case ExecutorStatus::kErrorReadInstMem:
+      if (!self->executor->error) {
+        PyErr_SetString(
+            PyExc_RuntimeError,
+            "Could not read instruction bytes.");
+        return nullptr;
+      }
+      [[clang::fallthrough]];
+
     default:
       if (self->executor->error) {
         PyErr_SetString(self->executor->error, self->executor->error_message);
         self->executor->error = nullptr;
+      } else if (!PyErr_Occurred()) {
+        PyErr_Format(
+            PyExc_RuntimeError,
+            "Unable to micro-execute instruction with status %u.",
+            static_cast<unsigned>(error_code));
       }
       return nullptr;
   }
@@ -151,7 +170,7 @@ static PyMethodDef gModuleMethods[] = {
 };
 
 static PyMethodDef gExecutorMethods[] = {
-  {"Execute",
+  {"execute",
    Executor_Execute,
    METH_VARARGS,
    "Interpret a string of bytes as a machine instruction and perform a "
@@ -173,7 +192,7 @@ static void WriteData(Data &data, T val) {
 
 // Convert a Python value into a `Data` object.
 bool PythonExecutor::ReadValue(
-    PyObject *res, size_t num_bits, Data &val) const {
+    PyObject *res, size_t num_bits, Data &val, const char *usage) const {
   const auto num_bytes = std::min(sizeof(val), (num_bits + 7) / 8);
   if (PyString_Check(res)) {
     auto res_size = static_cast<size_t>(PyString_Size(res));
@@ -181,9 +200,9 @@ bool PythonExecutor::ReadValue(
       error = PyExc_ValueError;
       snprintf(
           error_message, sizeof(error_message),
-          "Incorrect number of bytes returned for value; "
+          "Incorrect number of bytes returned for value from '%s'; "
           "wanted %zu bytes but got %zu bytes.",
-          num_bytes, res_size);
+          usage, num_bytes, res_size);
       return false;
     } else {
       memcpy(&(val.bytes[0]), PyString_AsString(res), num_bytes);
@@ -194,7 +213,7 @@ bool PythonExecutor::ReadValue(
 
   } else if (PyLong_Check(res)) {
     auto long_res = reinterpret_cast<PyLongObject *>(res);
-    if (0 != _PyLong_AsByteArray(long_res, val.bytes, num_bytes, true, false)){
+    if (0 != _PyLong_AsByteArray(long_res, val.bytes, num_bytes, true, false)) {
       return false;
     }
 
@@ -208,8 +227,8 @@ bool PythonExecutor::ReadValue(
     error = PyExc_TypeError;
     snprintf(
         error_message, sizeof(error_message),
-        "Cannot convert type '%s' into a byte sequence.",
-        res->ob_type->tp_name);
+        "Cannot convert type '%s' into a byte sequence from '%s'.",
+        res->ob_type->tp_name, usage);
     return false;
   }
   memset(&(val.bytes[num_bytes]), 0, sizeof(val) - num_bytes);
@@ -220,9 +239,11 @@ bool PythonExecutor::ReadValue(
 // the size explicit.
 bool PythonExecutor::ReadReg(const char *name, size_t size,
                              RegRequestHint, Data &val) const {
-  auto res = PyEval_CallMethod(self, "ReadReg", "(s)", name);
+  char usage[256];
+  auto res = PyEval_CallMethod(self, "read_register", "(s)", name);
   if (res) {
-    auto ret = ReadValue(res, size, val);
+    sprintf(usage, "read_register(\"%s\")", name);
+    auto ret = ReadValue(res, size, val, usage);
     Py_DECREF(res);
     return ret;
   } else {
@@ -233,17 +254,20 @@ bool PythonExecutor::ReadReg(const char *name, size_t size,
 bool PythonExecutor::WriteReg(const char *name, size_t size,
                               const Data &val) const {
   auto ret = PyEval_CallMethod(
-      self, "WriteReg", "(s,s#)", name, val.bytes, (size + 7) / 8);
+      self, "write_register", "(s,s#)", name, val.bytes, (size + 7) / 8);
   Py_XDECREF(ret);
   return nullptr != ret;
 }
 
 bool PythonExecutor::ReadMem(const char *seg, uintptr_t addr, size_t size,
                              MemRequestHint hint, Data &val) const {
+  char usage[256];
   auto res = PyEval_CallMethod(
-      self, "ReadMem", "(s,K,I,i)", seg, addr, size / 8, hint);
+      self, "read_memory", "(s,K,I,i)", seg, addr, size / 8, hint);
   if (res) {
-    auto ret = ReadValue(res, size, val);
+    sprintf(usage, "read_memory(\"%s\", 0x%08" PRIx64 ", %lu, %d)",
+            seg, addr, (size / 8), hint);
+    auto ret = ReadValue(res, size, val, usage);
     Py_DECREF(res);
     return ret;
   } else {
@@ -254,20 +278,20 @@ bool PythonExecutor::ReadMem(const char *seg, uintptr_t addr, size_t size,
 bool PythonExecutor::WriteMem(const char *seg, uintptr_t addr, size_t size,
                               const Data &val) const {
   auto ret = PyEval_CallMethod(
-      self, "WriteMem", "(s,K,s#)", seg, addr, val.bytes, size / 8);
+      self, "write_memory", "(s,K,s#)", seg, addr, val.bytes, size / 8);
   Py_XDECREF(ret);
   return nullptr != ret;
 }
 
 bool PythonExecutor::ReadFPU(FPU &val) const {
-  auto res = PyEval_CallMethod(self, "ReadFPU", "()");
+  auto res = PyEval_CallMethod(self, "read_fpu", "()");
   if (res) {
     if (!PyString_Check(res)) {
       Py_DECREF(res);
       error = PyExc_ValueError;
       snprintf(
           error_message, sizeof(error_message),
-          "Expected ReadFPU to return string.");
+          "Expected 'read_fpu' to return string.");
       return false;
     }
     auto res_size = static_cast<size_t>(PyString_Size(res));
@@ -275,7 +299,7 @@ bool PythonExecutor::ReadFPU(FPU &val) const {
       error = PyExc_ValueError;
       snprintf(
           error_message, sizeof(error_message),
-          "Incorrect number of bytes returned for value; "
+          "Incorrect number of bytes returned for value from 'read_fpu'; "
           "wanted %zu bytes but got %zu bytes.",
           sizeof(FPU), res_size);
       return false;
@@ -289,7 +313,7 @@ bool PythonExecutor::ReadFPU(FPU &val) const {
 
 bool PythonExecutor::WriteFPU(const FPU &val) const {
   auto ret = PyEval_CallMethod(
-      self, "WriteFPU", "(s#)", val.bytes, sizeof(val));
+      self, "write_fpu", "(s#)", val.bytes, sizeof(val));
   Py_XDECREF(ret);
   return nullptr != ret;
 }

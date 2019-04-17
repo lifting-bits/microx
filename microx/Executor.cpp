@@ -773,6 +773,17 @@ static uintptr_t BranchTarget(uintptr_t next_pc) {
   return next_pc + static_cast<uintptr_t>(static_cast<intptr_t>(disp));
 }
 
+// The current program counter.
+static uintptr_t GetPC(const Executor *executor) {
+  auto reg = WidestRegister(executor, XED_REG_EIP);
+  auto pc = ReadGPR(reg);
+  if (32 == executor->addr_size) {
+    return static_cast<uint32_t>(pc);
+  } else {
+    return pc;
+  }
+}
+
 // The next program counter.
 static uintptr_t GetNextPC(const Executor *executor) {
   auto reg = WidestRegister(executor, XED_REG_EIP);
@@ -1973,12 +1984,20 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
       return ExecutorStatus::kErrorReadReg;
     }
 
-    if (!ReadMem("CS", ReadValue<uintptr_t>(XED_REG_RIP), 15,
-                 MemRequestHint::kReadExecutable, idata)) {
+    const auto pc = GetPC(this);
+    size_t inst_length = 15;
+    for (; inst_length; --inst_length) {
+      if (ReadMem("CS", pc, inst_length * 8,
+                  MemRequestHint::kReadExecutable, idata)) {
+        break;
+      }
+    }
+
+    if (!inst_length) {
       return ExecutorStatus::kErrorReadInstMem;
     }
 
-    if (!DecodeInstruction(bytes, 16, addr_size)) {
+    if (!DecodeInstruction(bytes, inst_length, addr_size)) {
       return ExecutorStatus::kErrorDecode;
     }
 
