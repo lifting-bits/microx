@@ -1903,7 +1903,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
       return ExecutorStatus::kErrorReadReg;
     }
 
-    const auto pc = this->ComputeAddress(
+    const auto pc = ComputeAddress(
         "CS", GetPC(this), 0, 0, 0, 15 * 8, MemRequestHint::kReadExecutable);
 
     size_t inst_length = 15;

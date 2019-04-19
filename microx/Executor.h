@@ -52,7 +52,8 @@ enum class RegRequestHint {
   kConditionCode,
   kWriteBack,
   kMemoryBaseAddress,
-  kMemoryIndexAddress
+  kMemoryIndexAddress,
+  kMemorySegmentAddress
 };
 
 enum class MemRequestHint {

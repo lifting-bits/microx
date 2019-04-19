@@ -296,6 +296,7 @@ class Process(Executor):
   MEM_HINT_READ_EXECUTABLE = 1
   MEM_HINT_WRITE_ONLY = 2
   MEM_HINT_READ_WRITE = 3
+  MEM_HINT_ADDRESS_GEN = 4
 
   MEM_READ_HINTS = (MEM_HINT_READ_ONLY,
                     MEM_HINT_READ_EXECUTABLE,
@@ -334,6 +335,7 @@ class Process(Executor):
     if hint != self.MEM_HINT_ADDRESS_GEN:
       seg_base = self._ops.convert_to_integer(self.read_register(
           "{}_BASE".format(seg_name), Thread.REG_HINT_MEMORY_SEGMENT_ADDRESS))
+      seg_base = seg_base & self._memory._address_mask
     return seg_base + base_addr + (index * scale) + disp 
 
   def read_memory(self, addr, num_bytes, hint):

@@ -151,10 +151,15 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
       return nullptr;
 
     case ExecutorStatus::kErrorReadInstMem:
-      if (!self->executor->error) {
-        PyErr_SetString(
-            PyExc_RuntimeError,
-            "Could not read instruction bytes.");
+      if (!PyErr_Occurred()) {
+        if (!self->executor->error) {
+          PyErr_SetString(
+              PyExc_RuntimeError,
+              "Could not read instruction bytes.");
+        } else {
+          PyErr_SetString(self->executor->error, self->executor->error_message);
+          self->executor->error = nullptr;
+        }
         return nullptr;
       }
       [[clang::fallthrough]];
