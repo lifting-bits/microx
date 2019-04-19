@@ -36,8 +36,9 @@ if __name__ == "__main__":
 
   try:
     while True:
-      print("Emulating instruction at {:08x}".format(
-          o.convert_to_integer(t.read_register('EIP')), flush=True)
+      pc = t.read_register('EIP', t.REG_HINT_PROGRAM_COUNTER)
+      pc_int = o.convert_to_integer(pc)
+      print("Emulating instruction at {:08x}".format(pc_int))
       p.execute(t, 1)
   except Exception as e:
     print(e)
