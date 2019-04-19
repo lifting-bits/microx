@@ -1,2 +1,4 @@
 build/
 third_party/
+__pycache__/
+microx/__pycache__/

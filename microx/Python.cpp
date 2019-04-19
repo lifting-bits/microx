@@ -30,11 +30,11 @@
 #include "microx/Executor.h"
 
 #if PY_MAJOR_VERSION == 3
-#define PYTHON3
+# define PYTHON3
 #elif PY_MAJOR_VERSION == 2
-#define PYTHON2
+# define PYTHON2
 #else
-#error "Building for an unsupported Python version"
+# error "Building for an unsupported Python version"
 #endif
 
 namespace microx {
@@ -53,21 +53,25 @@ struct PythonExecutor : public Executor {
   bool ReadValue(PyObject *res, size_t num_bits, Data &val,
                  const char *usage) const;
 
-  virtual bool ReadReg(const char *name, size_t size, RegRequestHint hint,
-                       Data &val) const override;
+  uintptr_t ComputeAddress(const char *seg_name, uintptr_t base,
+                           uintptr_t index, uintptr_t scale,
+                           uintptr_t displacement, size_t size,
+                           MemRequestHint hint) const override;
 
-  virtual bool WriteReg(const char *name, size_t size,
-                        const Data &val) const override;
+  bool ReadReg(const char *name, size_t size, RegRequestHint hint,
+               Data &val) const override;
 
-  virtual bool ReadMem(const char *seg, uintptr_t addr, size_t size,
-                       MemRequestHint hint, Data &val) const override;
+  bool WriteReg(const char *name, size_t size,
+                const Data &val) const override;
 
-  virtual bool WriteMem(const char *seg, uintptr_t addr, size_t size,
-                        const Data &val) const override;
+  bool ReadMem(uintptr_t addr, size_t size, MemRequestHint hint,
+               Data &val) const override;
 
-  virtual bool ReadFPU(FPU &val) const override;
+  bool WriteMem(uintptr_t addr, size_t size, const Data &val) const override;
 
-  virtual bool WriteFPU(const FPU &val) const override;
+  bool ReadFPU(FPU &val) const override;
+
+  bool WriteFPU(const FPU &val) const override;
 
   PyObject * const self;
   mutable PyObject *error;
@@ -250,12 +254,42 @@ bool PythonExecutor::ReadValue(
   return true;
 }
 
+// Perform address computation. The segment register name is passed in so
+// that the extender can perform segmented address calculation.
+uintptr_t PythonExecutor::ComputeAddress(const char *seg_name, uintptr_t base,
+                                         uintptr_t index, uintptr_t scale,
+                                         uintptr_t displacement, size_t size,
+                                         MemRequestHint hint) const {
+  char usage[256];
+  auto res = PyObject_CallMethod(self, "compute_address", "(s,K,K,K,K,I,i)",
+                                 seg_name, base, index, scale, displacement,
+                                 size / 8, hint);
+
+  auto ret_addr = this->Executor::ComputeAddress(
+      seg_name, base, index, scale, displacement, size, hint);
+
+  if (res) {
+    sprintf(usage, "compute_address(\"%s\", 0x%08" PRIx64 ", 0x%08" PRIx64
+            ", 0x%08" PRIx64 ", 0x%08" PRIx64 ", %lu, %d)", seg_name, base,
+            index, scale, displacement, size / 8, hint);
+    Data val;
+    auto ret = ReadValue(res, addr_size, val, usage);
+    Py_DECREF(res);
+
+    if (ret) {
+      ret_addr = *reinterpret_cast<uintptr_t *>(val.bytes);
+    }
+  }
+
+  return ret_addr;
+}
+
 // Read a register from the environment. The name of the register should make
 // the size explicit.
 bool PythonExecutor::ReadReg(const char *name, size_t size,
-                             RegRequestHint, Data &val) const {
+                             RegRequestHint hint, Data &val) const {
   char usage[256];
-  auto res = PyObject_CallMethod(self, "read_register", "(s)", name);
+  auto res = PyObject_CallMethod(self, "read_register", "(s,i)", name, hint);
   if (res) {
     sprintf(usage, "read_register(\"%s\")", name);
     auto ret = ReadValue(res, size, val, usage);
@@ -280,14 +314,14 @@ bool PythonExecutor::WriteReg(const char *name, size_t size,
   return nullptr != ret;
 }
 
-bool PythonExecutor::ReadMem(const char *seg, uintptr_t addr, size_t size,
+bool PythonExecutor::ReadMem(uintptr_t addr, size_t size,
                              MemRequestHint hint, Data &val) const {
   char usage[256];
   auto res = PyObject_CallMethod(
-      self, "read_memory", "(s,K,I,i)", seg, addr, size / 8, hint);
+      self, "read_memory", "(K,I,i)", addr, size / 8, hint);
   if (res) {
-    sprintf(usage, "read_memory(\"%s\", 0x%08" PRIx64 ", %lu, %d)",
-            seg, addr, (size / 8), hint);
+    sprintf(usage, "read_memory(0x%08" PRIx64 ", %lu, %d)",
+            addr, (size / 8), hint);
     auto ret = ReadValue(res, size, val, usage);
     Py_DECREF(res);
     return ret;
@@ -296,15 +330,15 @@ bool PythonExecutor::ReadMem(const char *seg, uintptr_t addr, size_t size,
   }
 }
 
-bool PythonExecutor::WriteMem(const char *seg, uintptr_t addr, size_t size,
+bool PythonExecutor::WriteMem(uintptr_t addr, size_t size,
                               const Data &val) const {
   auto ret = PyEval_CallMethod(
 #if defined(PYTHON3)
-      self, "write_memory", "(s,K,y#)", seg, addr, val.bytes, size / 8);
+      self, "write_memory", "(K,y#)", addr, val.bytes, size / 8);
 #elif defined(PYTHON2)
-      self, "write_memory", "(s,K,s#)", seg, addr, val.bytes, size / 8);
+      self, "write_memory", "(K,s#)", addr, val.bytes, size / 8);
 #else
-#error "Unsupported Python"
+# error "Unsupported Python"
 #endif
   Py_XDECREF(ret);
   return nullptr != ret;
@@ -353,40 +387,40 @@ bool PythonExecutor::WriteFPU(const FPU &val) const {
 
 #ifdef PYTHON3
 struct module_state {
-    PyObject *error;
+  PyObject *error;
 };
 
 static struct PyModuleDef gModuleDef = {
-        PyModuleDef_HEAD_INIT,
-        "microx",
-        "x86 and x86-64 micro-execution support.",
-        sizeof(struct module_state),
-        gModuleMethods,
-        NULL,
-        NULL,
-        NULL,
-        NULL
+  PyModuleDef_HEAD_INIT,
+  "microx",
+  "x86 and x86-64 micro-execution support.",
+  sizeof(struct module_state),
+  gModuleMethods,
+  nullptr,
+  nullptr,
+  nullptr,
+  nullptr
 };
 #endif
 
 #ifdef PYTHON3
-#define RETURN_ERROR return nullptr
-#define RETURN_OK(x) return x
+# define RETURN_ERROR return nullptr
+# define RETURN_OK(x) return x
 #elif defined(PYTHON2)
-#define RETURN_ERROR return
-#define RETURN_OK(x) return
+# define RETURN_ERROR return
+# define RETURN_OK(x) return
 #else
-#error "Unsupported Python version"
+# error "Unsupported Python version"
 #endif
 
 #ifdef PYTHON3
 PyMODINIT_FUNC
-PyInit_microx(void) {
+PyInit_microx_core(void) {
 #elif defined(PYTHON2)
 PyMODINIT_FUNC
-initmicrox(void) {
+initmicrox_core(void) {
 #else
-#error "Unsupported Python version"
+# error "Unsupported Python version"
 #endif
   if (!Executor::Init()) {
     RETURN_ERROR;
@@ -396,24 +430,19 @@ initmicrox(void) {
   auto m = PyModule_Create(&gModuleDef);
 #elif defined(PYTHON2)
   auto m = Py_InitModule3(
-      "microx",
+      "microx_core",
       gModuleMethods,
       "x86 and x86-64 micro-execution support.");
 #endif
   if (!m) {
     RETURN_ERROR;
   }
-  enum {
-    x = sizeof(PythonExecutorObject),
-    y = sizeof(PythonExecutor),
-    z = y
-  };
 
   // Initialize the `Executor` type. Easier to manually initialize the various
   // fields as opposed to trying to make sure the structure field initialization
   // is just right.
   memset(&gExecutorType, 0, sizeof(gExecutorType));
-  gExecutorType.tp_name = "microx.Executor";
+  gExecutorType.tp_name = "microx_core.Executor";
   gExecutorType.tp_basicsize = sizeof(PythonExecutorObject);
   gExecutorType.tp_alloc = PyType_GenericAlloc;
   gExecutorType.tp_new = PyType_GenericNew;

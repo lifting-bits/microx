@@ -1,12 +1,11 @@
+#!/usr/bin/env python3
 # Copyright (c) 2019 Trail of Bits, Inc., all rights reserved.
 
-
 import collections
-import microx
 import sys
 import struct
-import traceback
 
+from microx_core import Executor
 
 class Operations(object):
   def convert_to_byte_string(self, data):
@@ -265,12 +264,21 @@ class Memory(object):
 
 
 class Thread(object):
+  REG_HINT_NONE = 0
+  REG_HINT_GENERAL = 1
+  REG_HINT_PROGRAM_COUNTER = 2
+  REG_HINT_CONDITION_CODE = 3
+  REG_HINT_WRITE_BACK = 4
+  REG_HINT_MEMORY_BASE_ADDRESS = 5
+  REG_HINT_MEMORY_INDEX_ADDRESS = 6
+  REG_HINT_MEMORY_SEGMENT_ADDRESS = 7
+
   def __init__(self, ops):
     self._regs = collections.defaultdict(int)
     self._fpu_data = b'\0' * 512
     self._ops = ops
 
-  def read_register(self, reg_name):
+  def read_register(self, reg_name, hint):
     return self._regs[reg_name]
 
   def write_register(self, reg_name, value):
@@ -283,7 +291,7 @@ class Thread(object):
     self._fpu_data = new_fpu_data
 
 
-class Process(microx.Executor):
+class Process(Executor):
   MEM_HINT_READ_ONLY = 0
   MEM_HINT_READ_EXECUTABLE = 1
   MEM_HINT_WRITE_ONLY = 2
@@ -315,14 +323,20 @@ class Process(microx.Executor):
     finally:
       self._thread = None
 
-  def read_register(self, reg_name):
-    return self._thread.read_register(reg_name)
+  def read_register(self, reg_name, hint):
+    return self._thread.read_register(reg_name, hint)
 
   def write_register(self, reg_name, val):
-    sys.stdout.write("Writing register {} = [{:x}]\n".format(reg_name, self._ops.convert_to_integer(val)))
     self._thread.write_register(reg_name, self._ops.convert_to_integer(val))
 
-  def read_memory(self, seg, addr, num_bytes, hint):
+  def compute_address(self, seg_name, base_addr, index, scale, disp, size, hint):
+    seg_base = 0
+    if hint != self.MEM_HINT_ADDRESS_GEN:
+      seg_base = self._ops.convert_to_integer(self.read_register(
+          "{}_BASE".format(seg_name), Thread.REG_HINT_MEMORY_SEGMENT_ADDRESS))
+    return seg_base + base_addr + (index * scale) + disp 
+
+  def read_memory(self, addr, num_bytes, hint):
     check_read = hint in self.MEM_READ_HINTS  
     check_write = hint in self.MEM_WRITE_HINTS
     check_exec = hint in self.MEM_EXEC_HINTS
@@ -347,10 +361,9 @@ class Process(microx.Executor):
         if not self._memory.can_execute(byte_addr):
           raise MemoryAccessException(
               "Address {:08x} is not executable".format(byte_addr))
-
     return self._memory.load(addr, num_bytes)
 
-  def write_memory(self, seg, addr, data):
+  def write_memory(self, addr, data):
     self._memory.store(addr, data)
 
   # The FPU is treated as an opaque blob of memory.
@@ -359,41 +372,3 @@ class Process(microx.Executor):
 
   def write_fpu(self, fpu):
     self._thread.write_fpu(fpu)
-
-
-if __name__ == "__main__":
-
-  # 13 Disassembly:
-  # 14 0:  55                      push   ebp
-  # 15 1:  89 e5                   mov    ebp,esp
-  # 16 3:  51                      push   ecx
-  # 17 4:  8b 45 08                mov    eax,DWORD PTR [ebp+0x8]
-  # 18 7:  8a 08                   mov    cl,BYTE PTR [eax]
-  # 19 9:  88 4d ff                mov    BYTE PTR [ebp-0x1],cl
-  # 20 c:  89 ec                   mov    esp,ebp
-  # 21 e:  5d                      pop    ebp
-  # 22 f:  c2 00 00                ret    0x0
-
-  o = Operations()
-
-  code = ArrayMemoryMap(o, 0x1000, 0x2000, can_execute=True)
-  stack = ArrayMemoryMap(o, 0x80000, 0x82000)
-
-  code.store_bytes(0x1000, b"\x55\x89\xE5\x51\x8B\x45\x08\x8A\x08\x88\x4D\xFF\x89\xEC\x5D\xC2\x00\x00")
-
-  m = Memory(o, 32)
-  m.add_map(code)
-  m.add_map(stack)
-
-  t = Thread(o)
-  t.write_register('EIP', 0x1000)
-  t.write_register('ESP', 0x81000)
-
-  p = Process(o, m)
-
-  try:
-    p.execute(t, 10)
-  except Exception as e:
-    print(e)
-    print(traceback.format_exc())
-
