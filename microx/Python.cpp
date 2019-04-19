@@ -22,10 +22,20 @@
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-register"
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <bytesobject.h>
 #pragma clang diagnostic pop
 
 #include "microx/Executor.h"
+
+#if PY_MAJOR_VERSION == 3
+#define PYTHON3
+#elif PY_MAJOR_VERSION == 2
+#define PYTHON2
+#else
+#error "Building for an unsupported Python version"
+#endif
 
 namespace microx {
 namespace {
@@ -194,8 +204,8 @@ static void WriteData(Data &data, T val) {
 bool PythonExecutor::ReadValue(
     PyObject *res, size_t num_bits, Data &val, const char *usage) const {
   const auto num_bytes = std::min(sizeof(val), (num_bits + 7) / 8);
-  if (PyString_Check(res)) {
-    auto res_size = static_cast<size_t>(PyString_Size(res));
+  if (PyBytes_Check(res)) {
+    auto res_size = static_cast<size_t>(PyBytes_Size(res));
     if (num_bytes != res_size) {
       error = PyExc_ValueError;
       snprintf(
@@ -205,11 +215,16 @@ bool PythonExecutor::ReadValue(
           usage, num_bytes, res_size);
       return false;
     } else {
-      memcpy(&(val.bytes[0]), PyString_AsString(res), num_bytes);
+      memcpy(&(val.bytes[0]), PyBytes_AsString(res), num_bytes);
     }
 
+#if defined(PYTHON3)
+  } else if (PyLong_CheckExact(res)) {
+    WriteData(val, PyLong_AsLong(res));
+#elif defined(PYTHON2)
   } else if (PyInt_CheckExact(res)) {
     WriteData(val, PyInt_AsLong(res));
+#endif
 
   } else if (PyLong_Check(res)) {
     auto long_res = reinterpret_cast<PyLongObject *>(res);
@@ -240,7 +255,7 @@ bool PythonExecutor::ReadValue(
 bool PythonExecutor::ReadReg(const char *name, size_t size,
                              RegRequestHint, Data &val) const {
   char usage[256];
-  auto res = PyEval_CallMethod(self, "read_register", "(s)", name);
+  auto res = PyObject_CallMethod(self, "read_register", "(s)", name);
   if (res) {
     sprintf(usage, "read_register(\"%s\")", name);
     auto ret = ReadValue(res, size, val, usage);
@@ -253,8 +268,14 @@ bool PythonExecutor::ReadReg(const char *name, size_t size,
 
 bool PythonExecutor::WriteReg(const char *name, size_t size,
                               const Data &val) const {
-  auto ret = PyEval_CallMethod(
+  auto ret = PyObject_CallMethod(
+#if defined(PYTHON3)
+      self, "write_register", "(s,y#)", name, val.bytes, (size + 7) / 8);
+#elif defined(PYTHON2)
       self, "write_register", "(s,s#)", name, val.bytes, (size + 7) / 8);
+#else
+#error "Unsupported Python"
+#endif
   Py_XDECREF(ret);
   return nullptr != ret;
 }
@@ -262,7 +283,7 @@ bool PythonExecutor::WriteReg(const char *name, size_t size,
 bool PythonExecutor::ReadMem(const char *seg, uintptr_t addr, size_t size,
                              MemRequestHint hint, Data &val) const {
   char usage[256];
-  auto res = PyEval_CallMethod(
+  auto res = PyObject_CallMethod(
       self, "read_memory", "(s,K,I,i)", seg, addr, size / 8, hint);
   if (res) {
     sprintf(usage, "read_memory(\"%s\", 0x%08" PRIx64 ", %lu, %d)",
@@ -278,15 +299,21 @@ bool PythonExecutor::ReadMem(const char *seg, uintptr_t addr, size_t size,
 bool PythonExecutor::WriteMem(const char *seg, uintptr_t addr, size_t size,
                               const Data &val) const {
   auto ret = PyEval_CallMethod(
+#if defined(PYTHON3)
+      self, "write_memory", "(s,K,y#)", seg, addr, val.bytes, size / 8);
+#elif defined(PYTHON2)
       self, "write_memory", "(s,K,s#)", seg, addr, val.bytes, size / 8);
+#else
+#error "Unsupported Python"
+#endif
   Py_XDECREF(ret);
   return nullptr != ret;
 }
 
 bool PythonExecutor::ReadFPU(FPU &val) const {
-  auto res = PyEval_CallMethod(self, "read_fpu", "()");
+  auto res = PyObject_CallMethod(self, "read_fpu", "()");
   if (res) {
-    if (!PyString_Check(res)) {
+    if (!PyBytes_Check(res)) {
       Py_DECREF(res);
       error = PyExc_ValueError;
       snprintf(
@@ -294,7 +321,7 @@ bool PythonExecutor::ReadFPU(FPU &val) const {
           "Expected 'read_fpu' to return string.");
       return false;
     }
-    auto res_size = static_cast<size_t>(PyString_Size(res));
+    auto res_size = static_cast<size_t>(PyBytes_Size(res));
     if (sizeof(FPU) != res_size) {
       error = PyExc_ValueError;
       snprintf(
@@ -304,7 +331,7 @@ bool PythonExecutor::ReadFPU(FPU &val) const {
           sizeof(FPU), res_size);
       return false;
     } else {
-      memcpy(&(val.bytes[0]), PyString_AsString(res), sizeof(FPU));
+      memcpy(&(val.bytes[0]), PyBytes_AsString(res), sizeof(FPU));
     }
   }
   Py_XDECREF(res);
@@ -312,24 +339,69 @@ bool PythonExecutor::ReadFPU(FPU &val) const {
 }
 
 bool PythonExecutor::WriteFPU(const FPU &val) const {
-  auto ret = PyEval_CallMethod(
+  auto ret = PyObject_CallMethod(
+#if defined(PYTHON3)
+      self, "write_fpu", "(z#)", val.bytes, sizeof(val));
+#elif defined(PYTHON2)
       self, "write_fpu", "(s#)", val.bytes, sizeof(val));
+#else
+#error "Unsupported Python"
+#endif
   Py_XDECREF(ret);
   return nullptr != ret;
 }
 
+#ifdef PYTHON3
+struct module_state {
+    PyObject *error;
+};
+
+static struct PyModuleDef gModuleDef = {
+        PyModuleDef_HEAD_INIT,
+        "microx",
+        "x86 and x86-64 micro-execution support.",
+        sizeof(struct module_state),
+        gModuleMethods,
+        NULL,
+        NULL,
+        NULL,
+        NULL
+};
+#endif
+
+#ifdef PYTHON3
+#define RETURN_ERROR return nullptr
+#define RETURN_OK(x) return x
+#elif defined(PYTHON2)
+#define RETURN_ERROR return
+#define RETURN_OK(x) return
+#else
+#error "Unsupported Python version"
+#endif
+
+#ifdef PYTHON3
+PyMODINIT_FUNC
+PyInit_microx(void) {
+#elif defined(PYTHON2)
 PyMODINIT_FUNC
 initmicrox(void) {
+#else
+#error "Unsupported Python version"
+#endif
   if (!Executor::Init()) {
-    return;
+    RETURN_ERROR;
   }
 
+#ifdef PYTHON3
+  auto m = PyModule_Create(&gModuleDef);
+#elif defined(PYTHON2)
   auto m = Py_InitModule3(
       "microx",
       gModuleMethods,
       "x86 and x86-64 micro-execution support.");
+#endif
   if (!m) {
-    return;
+    RETURN_ERROR;
   }
   enum {
     x = sizeof(PythonExecutorObject),
@@ -352,12 +424,13 @@ initmicrox(void) {
   gExecutorType.tp_methods = gExecutorMethods;
   gExecutorType.tp_base = &PyBaseObject_Type;
   if (0 != PyType_Ready(&gExecutorType)) {
-    return;
+    RETURN_ERROR;
   }
 
   Py_INCREF(&gExecutorType);
   PyModule_AddObject(
       m, "Executor", reinterpret_cast<PyObject *>(&gExecutorType));
+  RETURN_OK(m);
 }
 
 }  // namespace
