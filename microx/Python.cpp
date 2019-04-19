@@ -392,7 +392,7 @@ struct module_state {
 
 static struct PyModuleDef gModuleDef = {
   PyModuleDef_HEAD_INIT,
-  "microx",
+  "microx_core",
   "x86 and x86-64 micro-execution support.",
   sizeof(struct module_state),
   gModuleMethods,
