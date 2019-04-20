@@ -74,7 +74,8 @@ struct PythonExecutor : public Executor {
   bool WriteFPU(const FPU &val) const override;
 
   PyObject * const self;
-  mutable PyObject *error;
+  mutable bool has_error{false};
+  mutable PyObject *error{nullptr};
   mutable char error_message[512];
 };
 
@@ -118,6 +119,7 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
 
   auto self = reinterpret_cast<PythonExecutorObject *>(self_);
 
+  self->executor->has_error = false;
   self->executor->error = nullptr;
   switch (auto error_code = self->executor->Execute(num_execs)) {
     case ExecutorStatus::kGood:
@@ -165,6 +167,7 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
       } else if (self->executor->error) {
         PyErr_SetString(self->executor->error, self->executor->error_message);
         self->executor->error = nullptr;
+
       } else {
         PyErr_Format(
             PyExc_RuntimeError,
@@ -209,10 +212,16 @@ static void WriteData(Data &data, T val) {
 // Convert a Python value into a `Data` object.
 bool PythonExecutor::ReadValue(
     PyObject *res, size_t num_bits, Data &val, const char *usage) const {
+
+  if (has_error) {
+    return false;
+  }
+
   const auto num_bytes = std::min(sizeof(val), (num_bits + 7) / 8);
   if (PyBytes_Check(res)) {
     auto res_size = static_cast<size_t>(PyBytes_Size(res));
     if (num_bytes != res_size) {
+      has_error = true;
       error = PyExc_ValueError;
       snprintf(
           error_message, sizeof(error_message),
@@ -224,6 +233,16 @@ bool PythonExecutor::ReadValue(
       memcpy(&(val.bytes[0]), PyBytes_AsString(res), num_bytes);
     }
 
+  } else if (PyLong_Check(res)) {
+    auto long_res = reinterpret_cast<PyLongObject *>(res);
+    if (!_PyLong_AsByteArray(long_res, val.bytes, sizeof(val), true, false)) {
+      return true;
+    }
+    if (PyErr_Occurred()) {
+      has_error = true;
+    }
+    return false;
+
 #if defined(PYTHON3)
   } else if (PyLong_CheckExact(res)) {
     WriteData(val, PyLong_AsLong(res));
@@ -231,12 +250,6 @@ bool PythonExecutor::ReadValue(
   } else if (PyInt_CheckExact(res)) {
     WriteData(val, PyInt_AsLong(res));
 #endif
-
-  } else if (PyLong_Check(res)) {
-    auto long_res = reinterpret_cast<PyLongObject *>(res);
-    if (0 != _PyLong_AsByteArray(long_res, val.bytes, num_bytes, true, false)) {
-      return false;
-    }
 
   } else if (PyFloat_Check(res)) {
     if (32 == num_bits) {
@@ -262,6 +275,10 @@ uintptr_t PythonExecutor::ComputeAddress(const char *seg_name, uintptr_t base,
                                          uintptr_t index, uintptr_t scale,
                                          uintptr_t displacement, size_t size,
                                          MemRequestHint hint) const {
+  if (has_error) {
+    return false;
+  }
+
   char usage[256];
   auto res = PyObject_CallMethod(self, "compute_address", "(s,K,K,K,K,I,i)",
                                  seg_name, base, index, scale, displacement,
@@ -281,6 +298,9 @@ uintptr_t PythonExecutor::ComputeAddress(const char *seg_name, uintptr_t base,
     if (ret) {
       ret_addr = *reinterpret_cast<uintptr_t *>(val.bytes);
     }
+
+  } else if (PyErr_Occurred()) {
+    has_error = true;
   }
 
   return ret_addr;
@@ -290,6 +310,10 @@ uintptr_t PythonExecutor::ComputeAddress(const char *seg_name, uintptr_t base,
 // the size explicit.
 bool PythonExecutor::ReadReg(const char *name, size_t size,
                              RegRequestHint hint, Data &val) const {
+  if (has_error) {
+    return false;
+  }
+
   char usage[256];
   auto res = PyObject_CallMethod(self, "read_register", "(s,i)", name, hint);
   if (res) {
@@ -304,6 +328,10 @@ bool PythonExecutor::ReadReg(const char *name, size_t size,
 
 bool PythonExecutor::WriteReg(const char *name, size_t size,
                               const Data &val) const {
+  if (has_error) {
+    return false;
+  }
+
   auto ret = PyObject_CallMethod(
 #if defined(PYTHON3)
       self, "write_register", "(s,y#)", name, val.bytes, (size + 7) / 8);
@@ -318,6 +346,10 @@ bool PythonExecutor::WriteReg(const char *name, size_t size,
 
 bool PythonExecutor::ReadMem(uintptr_t addr, size_t size,
                              MemRequestHint hint, Data &val) const {
+  if (has_error) {
+    return false;
+  }
+
   char usage[256];
   auto res = PyObject_CallMethod(
       self, "read_memory", "(K,I,i)", addr, size / 8, hint);
@@ -334,6 +366,10 @@ bool PythonExecutor::ReadMem(uintptr_t addr, size_t size,
 
 bool PythonExecutor::WriteMem(uintptr_t addr, size_t size,
                               const Data &val) const {
+  if (has_error) {
+    return false;
+  }
+
   auto ret = PyEval_CallMethod(
 #if defined(PYTHON3)
       self, "write_memory", "(K,y#)", addr, val.bytes, size / 8);
@@ -347,10 +383,15 @@ bool PythonExecutor::WriteMem(uintptr_t addr, size_t size,
 }
 
 bool PythonExecutor::ReadFPU(FPU &val) const {
+  if (has_error) {
+    return false;
+  }
+
   auto res = PyObject_CallMethod(self, "read_fpu", "()");
   if (res) {
     if (!PyBytes_Check(res)) {
       Py_DECREF(res);
+      has_error = true;
       error = PyExc_ValueError;
       snprintf(
           error_message, sizeof(error_message),
@@ -359,12 +400,14 @@ bool PythonExecutor::ReadFPU(FPU &val) const {
     }
     auto res_size = static_cast<size_t>(PyBytes_Size(res));
     if (sizeof(FPU) != res_size) {
-      error = PyExc_ValueError;
-      snprintf(
-          error_message, sizeof(error_message),
-          "Incorrect number of bytes returned for value from 'read_fpu'; "
-          "wanted %zu bytes but got %zu bytes.",
-          sizeof(FPU), res_size);
+      if (!error) {
+        error = PyExc_ValueError;
+        snprintf(
+            error_message, sizeof(error_message),
+            "Incorrect number of bytes returned for value from 'read_fpu'; "
+            "wanted %zu bytes but got %zu bytes.",
+            sizeof(FPU), res_size);
+      }
       return false;
     } else {
       memcpy(&(val.bytes[0]), PyBytes_AsString(res), sizeof(FPU));
