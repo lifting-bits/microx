@@ -1,13 +1,18 @@
-#!/usr/bin/env python
-# Copyright 2016 Peter Goodman (peter@trailofbits.com), all rights reserved.
+#!/usr/bin/env python3
+# Copyright 2019 Trail of Bits, all rights reserved.
 
 import distutils.core
 import os
+import platform
+
+if 2 >= int(platform.python_version().split(".")[0]):
+  print("Microx is only supported on Python 3 and above.")
+  exit(1)
 
 MICROX_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
-microx = distutils.core.Extension(
-    "microx",
+microx_core = distutils.core.Extension(
+    "microx_core",
     include_dirs=[
         MICROX_DIR,
         os.path.join(MICROX_DIR, "third_party", "include")],
@@ -25,4 +30,7 @@ distutils.core.setup(
     description="x86 and x86_64 micro-executor.",
     author="Peter Goodman",
     author_email="peter@trailofbits.com",
-    ext_modules=[microx])
+    url="https://github.com/trailofbits/microx",
+    license="Apache-2.0",
+    py_modules=["microx.__init__"],
+    ext_modules=[microx_core])
