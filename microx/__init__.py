@@ -8,16 +8,20 @@ import struct
 from microx_core import Executor
 
 class Operations(object):
+  def convert_to_byte(self, byte):
+    if isinstance(byte, str):
+      byte = ord(byte[0])
+    return int(byte) & 0xFF
+
   def convert_to_byte_string(self, data):
-    return bytes(data)
+    if isinstance(data, int):
+      data = struct.unpack("BBBBBBBB", struct.pack("<Q", data))
+    return bytes(self.convert_to_byte(b) for b in data)
 
-  def convert_to_byte(self, data):
-    pass
-
-  def convert_to_big_integer(self, val_bytes):
+  def convert_to_big_integer(self, data):
     val = int(0)
-    for b in reversed(val_bytes):
-      val = (val << 8) | int(ord(b))
+    for b in reversed(data):
+      val = (val << 8) | self.convert_to_byte(b)
     return val
 
   def convert_to_integer(self, val):
@@ -25,14 +29,14 @@ class Operations(object):
       if 1 == len(val):
         val = ord(val)
       elif 2 == len(val):
-        val = struct.unpack('<H',val)[0]
+        val = struct.unpack('<H', val)[0]
       elif 4 == len(val):
-        val = struct.unpack('<I',val)[0]
+        val = struct.unpack('<I', val)[0]
       elif 8 == len(val):
-        val = struct.unpack('<Q',val)[0]
+        val = struct.unpack('<Q', val)[0]
       else:
         val = self.convert_to_big_integer(val)
-    assert isinstance(val, (int))
+    assert isinstance(val, int)
     return val
 
 
@@ -100,6 +104,55 @@ class MemoryMap(object):
         "Can't store {} bytes to address {:08x}".format(len(data), addr))
   
 
+class ProxyMemoryMap(MemoryMap):
+  def __init__(self, next):
+    self._next = next
+
+  def can_read(self, byte_addr):
+    return self._next.can_read(byte_addr)
+
+  def can_write(self, byte_addr):
+    return self._next.can_write(byte_addr)
+
+  def can_execute(self, byte_addr):
+    return self._next.can_execute(byte_addr)
+
+  def base(self):
+    return self._next.base()
+
+  def limit(self):
+    return self._next.limit()
+
+  def load_byte(self, addr):
+    return self._next.load_byte(addr)
+
+  def load_word(self, addr):
+    return self._next.load_word(addr)
+
+  def load_dword(self, addr):
+    return self._next.load_dword(addr)
+
+  def load_qword(self, addr):
+    return self._next.load_qword(addr)
+
+  def load_bytes(self, addr, num_bytes):
+    return self._next.load_bytes(addr, num_bytes)
+
+  def store_byte(self, addr, val):
+    return self._next.store_byte(addr, val)
+
+  def store_word(self, addr, val):
+    return self._next.store_word(addr, val)
+
+  def store_dword(self, addr, val):
+    return self._next.store_dword(addr, val)
+
+  def store_qword(self, addr, val):
+    return self._next.store_qword(addr, val)
+
+  def store_bytes(self, addr, data):
+    return self._next.store_bytes(addr, data)
+
 
 class PermissionedMemoryMap(MemoryMap):
   def __init__(self, ops, base, limit, can_read=True, can_write=True,
@@ -156,23 +209,19 @@ class ArrayMemoryMap(PermissionedMemoryMap):
     return self._data[offset:(offset + num_bytes)]
 
   def store_byte(self, addr, data):
-    if isinstance(data, (int,)):
-      data = struct.unpack("BBBBBBBB", struct.pack("<Q", data))
+    data = self._ops.convert_to_byte_string(data)
     self.store_bytes(addr, data[:1])
 
   def store_word(self, addr, data):
-    if isinstance(data, (int,)):
-      data = struct.unpack("BBBBBBBB", struct.pack("<Q", data))
+    data = self._ops.convert_to_byte_string(data)
     self.store_bytes(addr, data[:2])
 
   def store_dword(self, addr, data):
-    if isinstance(data, (int,)):
-      data = struct.unpack("BBBBBBBB", struct.pack("<Q", data))
+    data = self._ops.convert_to_byte_string(data)
     self.store_bytes(addr, data[:4])
 
   def store_qword(self, addr, data):
-    if isinstance(data, (int,)):
-      data = struct.unpack("BBBBBBBB", struct.pack("<Q", data))
+    data = self._ops.convert_to_byte_string(data)
     self.store_bytes(addr, data[:8])
 
   def store_bytes(self, addr, data):

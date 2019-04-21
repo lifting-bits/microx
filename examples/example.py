@@ -19,7 +19,7 @@ if __name__ == "__main__":
 
   o = microx.Operations()
 
-  code = microx.ArrayMemoryMap(o, 0x1000, 0x2000, can_execute=True)
+  code = microx.ArrayMemoryMap(o, 0x1000, 0x2000, can_write=False, can_execute=True)
   stack = microx.ArrayMemoryMap(o, 0x80000, 0x82000)
 
   code.store_bytes(0x1000, b"\x55\x89\xE5\x51\x8B\x45\x08\x8A\x08\x88\x4D\xFF\x89\xEC\x5D\xC2\x00\x00")
