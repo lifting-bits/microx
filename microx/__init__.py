@@ -8,37 +8,17 @@ import struct
 from microx_core import Executor
 
 class Operations(object):
-  def convert_to_byte(self, byte):
-    if isinstance(byte, str):
-      byte = ord(byte[0])
-    return int(byte) & 0xFF
 
   def convert_to_byte_string(self, data):
     if isinstance(data, int):
-      data = struct.unpack("BBBBBBBB", struct.pack("<Q", data))
-    return bytes(self.convert_to_byte(b) for b in data)
-
-  def convert_to_big_integer(self, data):
-    val = int(0)
-    for b in reversed(data):
-      val = (val << 8) | self.convert_to_byte(b)
-    return val
+      return data.to_bytes(8, byte_order='little')
+    return bytes(data)
 
   def convert_to_integer(self, val):
     if isinstance(val, (str, bytes, bytearray)):
-      if 1 == len(val):
-        val = ord(val)
-      elif 2 == len(val):
-        val = struct.unpack('<H', val)[0]
-      elif 4 == len(val):
-        val = struct.unpack('<I', val)[0]
-      elif 8 == len(val):
-        val = struct.unpack('<Q', val)[0]
-      else:
-        val = self.convert_to_big_integer(val)
+      val = int.from_bytes(val, byteorder='little')
     assert isinstance(val, int)
     return val
-
 
 class MemoryAccessException(Exception):
   pass
