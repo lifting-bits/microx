@@ -7,25 +7,36 @@ import struct
 
 from microx_core import Executor
 
-class Operations(object):
-  def convert_to_byte(self, byte):
-    if isinstance(byte, str):
-      byte = ord(byte[0])
-    return int(byte) & 0xFF
+LIST_LIKE = (str, bytes, bytearray, tuple, list)
 
-  def convert_to_byte_string(self, data):
+class Operations(object):
+  def convert_to_byte(self, byte, for_exe=False):
+    if isinstance(byte, LIST_LIKE):
+      if isinstance(byte, str):
+        byte = ord(byte[0])
+      elif isinstance(byte, (bytes, bytearray)):
+        byte = byte[0]
+      else:
+        return self.convert_to_byte(byte[0], for_exe)
+    return byte & 0xFF
+
+  def convert_to_byte_string(self, data, for_exe=False):
     if isinstance(data, int):
       data = struct.unpack("BBBBBBBB", struct.pack("<Q", data))
-    return bytes(self.convert_to_byte(b) for b in data)
+ 
+    if for_exe:
+      return bytes(self.convert_to_byte(b, True) for b in data)
+    else:
+      return tuple(self.convert_to_byte(b, False) for b in data)
 
-  def convert_to_big_integer(self, data):
+  def convert_to_big_integer(self, data, for_exe=False):
     val = int(0)
     for b in reversed(data):
-      val = (val << 8) | self.convert_to_byte(b)
+      val = (val << 8) | self.convert_to_byte(b, for_exe)
     return val
 
-  def convert_to_integer(self, val):
-    if isinstance(val, (str, bytes, bytearray)):
+  def convert_to_integer(self, val, for_exe=False):
+    if isinstance(val, str):
       if 1 == len(val):
         val = ord(val)
       elif 2 == len(val):
@@ -34,10 +45,32 @@ class Operations(object):
         val = struct.unpack('<I', val)[0]
       elif 8 == len(val):
         val = struct.unpack('<Q', val)[0]
-      else:
-        val = self.convert_to_big_integer(val)
-    assert isinstance(val, int)
+
+    elif isinstance(val, LIST_LIKE):
+      val = self.convert_to_byte_string(val, for_exe)
+      val = self.convert_to_big_integer(val, for_exe)
+
+    if for_exe:
+      assert isinstance(val, int)
+
     return val
+
+
+class ProxyOperations(Operations):
+  def __init__(self, next):
+    self._next = next
+
+  def convert_to_byte(self, byte, for_exe=False):
+    return self._next.convert_to_byte(byte, for_exe)
+
+  def convert_to_byte_string(self, data, for_exe=False):
+    return self._next.convert_to_byte_string(data, for_exe)
+
+  def convert_to_big_integer(self, data, for_exe=False):
+    return self._next.convert_to_big_integer(data, for_exe)
+
+  def convert_to_integer(self, val, for_exe=False):
+    return self._next.convert_to_integer(val, for_exe)
 
 
 class MemoryAccessException(Exception):
@@ -45,8 +78,13 @@ class MemoryAccessException(Exception):
 
 
 class MemoryMap(object):
-  def __init__(self):
-    pass
+  def addresses(self):
+    i = 0
+    base = self.base()
+    limit = self.limit()
+    while (base + i) < limit:
+      yield base + i
+      i += 1
 
   def can_read(self, byte_addr):
     return False
@@ -190,42 +228,52 @@ class ArrayMemoryMap(PermissionedMemoryMap):
 
   def load_byte(self, addr):
     offset = addr - self._base
-    return self._ops.convert_to_byte_string(self._data[offset:(offset + 1)])
+    return self._data[offset:(offset + 1)]
 
   def load_word(self, addr):
     offset = addr - self._base
-    return self._ops.convert_to_byte_string(self._data[offset:(offset + 2)])
+    return self._data[offset:(offset + 2)]
 
   def load_dword(self, addr):
     offset = addr - self._base
-    return self._ops.convert_to_byte_string(self._data[offset:(offset + 4)])
+    return self._data[offset:(offset + 4)]
 
   def load_qword(self, addr):
     offset = addr - self._base
-    return self._ops.convert_to_byte_string(self._data[offset:(offset + 8)])
+    return self._data[offset:(offset + 8)]
 
   def load_bytes(self, addr, num_bytes):
     offset = addr - self._base
     return self._data[offset:(offset + num_bytes)]
 
   def store_byte(self, addr, data):
-    data = self._ops.convert_to_byte_string(data)
-    self.store_bytes(addr, data[:1])
+    if isinstance(data, LIST_LIKE):
+      self.store_bytes(addr, data[:1])
+    else:
+      self.store_bytes(addr, data)
 
   def store_word(self, addr, data):
-    data = self._ops.convert_to_byte_string(data)
-    self.store_bytes(addr, data[:2])
+    if isinstance(data, LIST_LIKE):
+      self.store_bytes(addr, data[:2])
+    else:
+      self.store_bytes(addr, data)
 
   def store_dword(self, addr, data):
-    data = self._ops.convert_to_byte_string(data)
-    self.store_bytes(addr, data[:4])
+    if isinstance(data, LIST_LIKE):
+      self.store_bytes(addr, data[:4])
+    else:
+      self.store_bytes(addr, data)
 
   def store_qword(self, addr, data):
-    data = self._ops.convert_to_byte_string(data)
-    self.store_bytes(addr, data[:8])
+    if isinstance(data, LIST_LIKE):
+      self.store_bytes(addr, data[:8])
+    else:
+      self.store_bytes(addr, data)
 
   def store_bytes(self, addr, data):
     offset = addr - self._base
+    if not isinstance(data, LIST_LIKE):
+      data = self._ops.convert_to_byte_string(data)
     for b in data:
       if isinstance(b, str):
         b = ord(b)
@@ -234,6 +282,12 @@ class ArrayMemoryMap(PermissionedMemoryMap):
 
 
 class Memory(object):
+  MEM_HINT_READ_ONLY = 0
+  MEM_HINT_READ_EXECUTABLE = 1
+  MEM_HINT_WRITE_ONLY = 2
+  MEM_HINT_READ_WRITE = 3
+  MEM_HINT_ADDRESS_GEN = 4
+
   def __init__(self, ops, address_size, page_shift=12):
     assert address_size in (32, 64)
     assert 0 < page_shift < 32
@@ -259,6 +313,7 @@ class Memory(object):
     return self._address_size
 
   def add_map(self, mmap):
+    assert isinstance(mmap, MemoryMap)
     base, limit = mmap.base(), mmap.limit()
     assert ((base >> self._page_shift) << self._page_shift) == base
     while base < limit:
@@ -291,7 +346,7 @@ class Memory(object):
         byte_addr = addr + i
         i += 1
         reads.append(self._find_map(byte_addr).load_bytes(byte_addr, 1)[0])
-      return self._ops.convert_to_byte_string(reads)
+      return reads
 
   def store(self, addr, data):
     num_bytes = len(data)
@@ -323,9 +378,26 @@ class Thread(object):
   REG_HINT_MEMORY_SEGMENT_ADDRESS = 7
 
   def __init__(self, ops):
+    self._ops = ops
+
+  def read_register(self, reg_name, hint):
+    raise Exception("Abstract")
+
+  def write_register(self, reg_name, value):
+    raise Exception("Abstract")
+
+  def read_fpu(self):
+    raise Exception("Abstract")
+
+  def write_fpu(self, new_fpu_data):
+    raise Exception("Abstract")
+
+
+class EmptyThread(Thread):
+  def __init__(self, ops):
+    super(EmptyThread, self).__init__(ops)
     self._regs = collections.defaultdict(int)
     self._fpu_data = b'\0' * 512
-    self._ops = ops
 
   def read_register(self, reg_name, hint):
     return self._regs[reg_name]
@@ -340,21 +412,34 @@ class Thread(object):
     self._fpu_data = new_fpu_data
 
 
+class ProxyThread(Thread):
+  def __init__(self, next):
+    super(ProxyThread, self).__init__(next._ops)
+    assert isinstance(next, Thread)
+    self._next = next
+
+  def read_register(self, reg_name, hint):
+    return self._next.read_register(reg_name, hint)
+
+  def write_register(self, reg_name, value):
+    return self._next.write_register(reg_name, value)
+
+  def read_fpu(self):
+    return self._next.read_fpu()
+
+  def write_fpu(self, new_fpu_data):
+    return self._next.write_fpu(new_fpu_data)
+
+
 class Process(Executor):
-  MEM_HINT_READ_ONLY = 0
-  MEM_HINT_READ_EXECUTABLE = 1
-  MEM_HINT_WRITE_ONLY = 2
-  MEM_HINT_READ_WRITE = 3
-  MEM_HINT_ADDRESS_GEN = 4
+  MEM_READ_HINTS = (Memory.MEM_HINT_READ_ONLY,
+                    Memory.MEM_HINT_READ_EXECUTABLE,
+                    Memory.MEM_HINT_READ_WRITE)
 
-  MEM_READ_HINTS = (MEM_HINT_READ_ONLY,
-                    MEM_HINT_READ_EXECUTABLE,
-                    MEM_HINT_READ_WRITE)
+  MEM_WRITE_HINTS = (Memory.MEM_HINT_WRITE_ONLY,
+                     Memory.MEM_HINT_READ_WRITE)
 
-  MEM_WRITE_HINTS = (MEM_HINT_WRITE_ONLY,
-                     MEM_HINT_READ_WRITE)
-
-  MEM_EXEC_HINTS = (MEM_HINT_READ_EXECUTABLE,)
+  MEM_EXEC_HINTS = (Memory.MEM_HINT_READ_EXECUTABLE,)
 
   def __init__(self, ops, memory):
     assert isinstance(memory, Memory)
@@ -374,16 +459,17 @@ class Process(Executor):
       self._thread = None
 
   def read_register(self, reg_name, hint):
-    return self._thread.read_register(reg_name, hint)
+    return self._ops.convert_to_integer(
+        self._thread.read_register(reg_name, hint), for_exe=True)
 
   def write_register(self, reg_name, val):
     self._thread.write_register(reg_name, self._ops.convert_to_integer(val))
 
   def compute_address(self, seg_name, base_addr, index, scale, disp, size, hint):
     seg_base = 0
-    if hint != self.MEM_HINT_ADDRESS_GEN:
-      seg_base = self._ops.convert_to_integer(self.read_register(
-          "{}_BASE".format(seg_name), Thread.REG_HINT_MEMORY_SEGMENT_ADDRESS))
+    if hint != Memory.MEM_HINT_ADDRESS_GEN:
+      seg_base = self.read_register(
+          "{}_BASE".format(seg_name), Thread.REG_HINT_MEMORY_SEGMENT_ADDRESS)
       seg_base = seg_base & self._memory._address_mask
     return seg_base + base_addr + (index * scale) + disp 
 
@@ -412,14 +498,20 @@ class Process(Executor):
         if not self._memory.can_execute(byte_addr):
           raise MemoryAccessException(
               "Address {:08x} is not executable".format(byte_addr))
-    return self._memory.load(addr, num_bytes)
+    
+    return self._ops.convert_to_byte_string(
+        self._memory.load(addr, num_bytes),
+        for_exe=True)
 
   def write_memory(self, addr, data):
+    data = self._ops.convert_to_byte_string(data)
     self._memory.store(addr, data)
 
   # The FPU is treated as an opaque blob of memory.
   def read_fpu(self):
-    return self._thread.read_fpu()
+    return self._ops.convert_to_byte_string(
+        self._thread.read_fpu(), for_exe=True)
 
   def write_fpu(self, fpu):
-    self._thread.write_fpu(fpu)
+    self._thread.write_fpu(
+        self._ops.convert_to_byte_string(fpu, for_exe=True))

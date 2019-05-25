@@ -275,10 +275,10 @@ static bool ReadRegistersMemOp(const Executor *executor, unsigned op_num) {
 static bool ReadRegisters(const Executor *executor) {
   auto num_operands = xed_decoded_inst_noperands(gXedd);
   auto xedi = xed_decoded_inst_inst(gXedd);
+  
+  // Start by going and getting registers involved in memory access.
   for (auto i = 0U, mem_index = 0U; i < num_operands; ++i) {
     auto xedo = xed_inst_operand(xedi, i);
-    auto hint = !xed_operand_written(xedo) ? RegRequestHint::kGeneral :
-                                             RegRequestHint::kWriteBack;
     switch (auto op_name = xed_operand_name(xedo)) {
       case XED_OPERAND_AGEN:
       case XED_OPERAND_MEM0:
@@ -287,7 +287,18 @@ static bool ReadRegisters(const Executor *executor) {
           return false;
         }
         break;
+      default:
+        break;
+    }
+  }
 
+  // Then get the registers associated with reads.
+  for (auto i = 0U; i < num_operands; ++i) {
+    auto xedo = xed_inst_operand(xedi, i);
+    if (xed_operand_written(xedo)) {
+      continue;
+    }
+    switch (auto op_name = xed_operand_name(xedo)) {
       case XED_OPERAND_REG:
       case XED_OPERAND_REG0:
       case XED_OPERAND_REG1:
@@ -299,7 +310,35 @@ static bool ReadRegisters(const Executor *executor) {
       case XED_OPERAND_REG7:
       case XED_OPERAND_REG8:
         if (auto reg = xed_decoded_inst_get_reg(gXedd, op_name)) {
-          if (!ReadRegister(executor, reg, hint)) {
+          if (!ReadRegister(executor, reg, RegRequestHint::kGeneral)) {
+            return false;
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Finally get the written registers.
+  for (auto i = 0U; i < num_operands; ++i) {
+    auto xedo = xed_inst_operand(xedi, i);
+    if (!xed_operand_written(xedo)) {
+      continue;
+    }
+    switch (auto op_name = xed_operand_name(xedo)) {
+      case XED_OPERAND_REG:
+      case XED_OPERAND_REG0:
+      case XED_OPERAND_REG1:
+      case XED_OPERAND_REG2:
+      case XED_OPERAND_REG3:
+      case XED_OPERAND_REG4:
+      case XED_OPERAND_REG5:
+      case XED_OPERAND_REG6:
+      case XED_OPERAND_REG7:
+      case XED_OPERAND_REG8:
+        if (auto reg = xed_decoded_inst_get_reg(gXedd, op_name)) {
+          if (!ReadRegister(executor, reg, RegRequestHint::kWriteBack)) {
             return false;
           }
         }
@@ -379,9 +418,15 @@ static bool WriteRegisters(const Executor *executor) {
     WriteGPR(XED_REG_RSP, ReadGPR(gStackPtrAlias));
     gStackPtrAlias = XED_REG_INVALID;
   }
+
+  xed_reg_enum_t pc_reg = XED_REG_INVALID;
   for (auto i = 0UL; i < gUsedRegs.size(); ++i) {
+    const auto reg = static_cast<xed_reg_enum_t>(i);
+    if (i == XED_REG_EIP || i == XED_REG_RIP) {
+      pc_reg = reg;
+      continue;
+    }
     if (gModifiedRegs.test(i)) {
-      const auto reg = static_cast<xed_reg_enum_t>(i);
       const auto name = xed_reg_enum_t2str(reg);
       const auto size = xed_get_register_width_bits64(reg);
       const auto store_reg = xed_get_largest_enclosing_register(reg);
@@ -390,6 +435,17 @@ static bool WriteRegisters(const Executor *executor) {
       }
     }
   }
+
+  // Make sure the last written register is the program counter.
+  if (XED_REG_INVALID != pc_reg) {
+    const auto name = xed_reg_enum_t2str(pc_reg);
+    const auto size = xed_get_register_width_bits64(pc_reg);
+    const auto store_reg = xed_get_largest_enclosing_register(pc_reg);
+    if (!executor->WriteReg(name, size, gRegs[store_reg])) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -1904,7 +1960,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
     }
 
     const auto pc = ComputeAddress(
-        "CS", GetPC(this), 0, 0, 0, 15 * 8, MemRequestHint::kReadExecutable);
+        "CS", GetPC(this), 0, 0, 0, 8, MemRequestHint::kReadExecutable);
 
     size_t inst_length = 15;
     for (; inst_length; --inst_length) {
@@ -2027,12 +2083,12 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
       }
     }
 
-    // Write back any registers that were read or written.
-    SetNextPC(this, next_pc);
-
     if (!WriteFlags(this)) {
       return ExecutorStatus::kErrorWriteFlags;
     }
+
+    // Write back any registers that were read or written.
+    SetNextPC(this, next_pc);
 
     if (!WriteRegisters(this)) {
       return ExecutorStatus::kErrorWriteReg;
