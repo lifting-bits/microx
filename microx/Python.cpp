@@ -370,7 +370,7 @@ bool PythonExecutor::WriteMem(uintptr_t addr, size_t size,
     return false;
   }
 
-  auto ret = PyEval_CallMethod(
+  auto ret = PyObject_CallMethod(
 #if defined(PYTHON3)
       self, "write_memory", "(K,y#)", addr, val.bytes, size / 8);
 #elif defined(PYTHON2)
