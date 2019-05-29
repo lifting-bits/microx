@@ -106,6 +106,9 @@ static int Executor_init(PyObject *self_, PyObject *args, PyObject *) {
   return 0;
 }
 
+// A reference to the InstructionFetchError
+static PyObject *InstructionFetchError{nullptr};
+
 // Emulate an instruction.
 static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
   size_t num_execs = 0;
@@ -154,9 +157,9 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
 
     case ExecutorStatus::kErrorReadInstMem:
       if (!PyErr_Occurred() && !self->executor->error) {
-        PyErr_SetString(
-            PyExc_RuntimeError,
-            "Could not read instruction bytes.");
+				PyErr_SetString(
+						InstructionFetchError,
+						"Could not read instruction bytes.");
       }
       [[clang::fallthrough]];
 
@@ -504,6 +507,17 @@ initmicrox_core(void) {
   Py_INCREF(&gExecutorType);
   PyModule_AddObject(
       m, "Executor", reinterpret_cast<PyObject *>(&gExecutorType));
+
+
+	InstructionFetchError = PyErr_NewException(
+			"microx.InstructionFetchError", nullptr, nullptr);
+	if (nullptr == InstructionFetchError) {
+			RETURN_ERROR;
+	}
+  Py_INCREF(InstructionFetchError);
+  PyModule_AddObject(
+      m, "InstructionFetchError", InstructionFetchError);
+
   RETURN_OK(m);
 }
 
