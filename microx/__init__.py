@@ -25,8 +25,24 @@ class MemoryAccessException(Exception):
 
 
 class MemoryMap(object):
-  def __init__(self):
-    pass
+  def __init__(self, mapname=None):
+    if mapname is None:
+      # Default to a sane-ish map name
+      self.__name = "map_{:08x}-{:08x}".format(self.base(), self.limit())
+    else:
+      # Assume they picked a sane name
+      self.__name = mapname
+
+  def get_name(self):
+      return self.__name
+
+  def set_name(self, value):
+      self.__name = value
+
+  def del_name(self):
+      del self.__name
+
+  name = property(get_name, set_name, del_name, "This mapping's human readable name")
 
   def can_read(self, byte_addr):
     return False
@@ -85,7 +101,8 @@ class MemoryMap(object):
   
 
 class ProxyMemoryMap(MemoryMap):
-  def __init__(self, next):
+  def __init__(self, next, mapname=None):
+    super(ProxyMemoryMap, self).__init__(mapname)
     self._next = next
 
   def can_read(self, byte_addr):
@@ -136,7 +153,7 @@ class ProxyMemoryMap(MemoryMap):
 
 class PermissionedMemoryMap(MemoryMap):
   def __init__(self, ops, base, limit, can_read=True, can_write=True,
-               can_execute=False):
+               can_execute=False, mapname=None):
     assert base < limit
     self._ops = ops
     self._base = base
@@ -144,6 +161,7 @@ class PermissionedMemoryMap(MemoryMap):
     self._can_read = can_read
     self._can_write = can_write
     self._can_execute = can_execute
+    super(PermissionedMemoryMap, self).__init__(mapname)
 
   def can_read(self, byte_addr):
     return self._can_read and self._base <= byte_addr < self._limit
@@ -222,6 +240,20 @@ class Memory(object):
     self._address_mask = (1 << self._address_size) - 1
     self._page_shift = page_shift
     self._memory_maps = collections.defaultdict(MemoryMap)
+
+
+  def find_maps_by_name(self, map_name):
+
+    found_maps = set()
+    #TODO(artem): This iterates over every page in the
+    # memory map we have. This is wasteful since there
+    # are much fewer unique maps. We can try keeping track
+    # of unique maps as we add them, and disallow overlapping maps
+    for (k,v) in self._memory_maps.items():
+      if map_name == v.name:
+        found_maps.add(v)
+
+    return found_maps
 
   def _find_map(self, byte_addr):
     return self._memory_maps[(byte_addr & self._address_mask) >> self._page_shift]
