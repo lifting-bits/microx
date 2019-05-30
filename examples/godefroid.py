@@ -67,11 +67,11 @@ class DefaultMemoryPolicy:
         return False
 
     def read_before_write(self, addr, size, data):
-        sys.stdout.write("Read before write of {:x} - {:x}\n".format(addr, addr + size))
+        # sys.stdout.write("Read before write of {:x} - {:x}\n".format(addr, addr + size))
         return data
 
     def write_before_read(self, addr, size, data):
-        sys.stdout.write("Write before read of {:x} - {:x}\n".format(addr, addr + size))
+        # sys.stdout.write("Write before read of {:x} - {:x}\n".format(addr, addr + size))
         return data
 
 
@@ -119,6 +119,7 @@ class PolicyMemoryMap(FlaggedMemoryMap):
 
         # this policy doesn't care about memory writes
         if not self._policy.handle_store(addr):
+            # sys.stdout.write(f"!!! Addr not in policy: {addr:08x}\n")
             return
 
         flag_list = [
@@ -138,6 +139,10 @@ class PolicyMemoryMap(FlaggedMemoryMap):
 
             assert len(new_data) == size
             self._data[start:end] = new_data
+        else:
+            # For now, assume we care a about *all* writes except those that
+            # this mapping isn't set up to handle
+            self._policy.add_output(addr, size)
 
         # Mark all data as written
         for i in range(size):
@@ -145,7 +150,7 @@ class PolicyMemoryMap(FlaggedMemoryMap):
             self._access_map[addr + i] = flag_list[i]
 
     def _load_unit(self, addr, size):
-        #sys.stdout.write("Load size({:d}) at {:x}\n".format(size, addr))
+        # sys.stdout.write("Load size({:d}) at {:x}\n".format(size, addr))
         self._load_policy(addr, size)
         offset = addr - self._base
         return self._ops.convert_to_byte_string(self._data[offset : (offset + size)])
@@ -229,6 +234,12 @@ class InputMemoryPolicy:
         # maps address (such as stack) -> where it points to (in "heap")
         self._pointer_map = {}
 
+    def add_output(self, addr, size):
+        sys.stdout.write(
+            f"!!! Manually adding output at {addr:08x} - {addr+size:08x}\n"
+        )
+        self._known_outputs[addr] = size
+
     def pointer_to_bytes(self, ptr):
         return int(ptr).to_bytes(self._address_size, byteorder="little")
 
@@ -294,7 +305,11 @@ class InputMemoryPolicy:
         return new_data
 
     def write_before_read(self, addr, size, data):
-        sys.stdout.write("Write before read of {:x} - {:x}\n".format(addr, addr + size))
+        sys.stdout.write(f"Write-before-read of {size} bytes")
+        sys.stdout.write(f" at {addr:08x} [{addr:08x} - {addr+size:08x}]\n")
+
+        self._known_outputs[addr] = size
+
         return data
 
     def _make_itype(self, addr, size):
@@ -306,6 +321,47 @@ class InputMemoryPolicy:
             return (size, InputType.DATA, 0)
         elif size == 0:
             return (size, InputType.COMPUTED, 0)
+
+    def get_outputs(self):
+        # a copy of get_inputs that doesn't care about
+        # the kind of output, at least for now
+        output_addrs = sorted(self._known_outputs.keys())
+
+        merged_addrs = collections.OrderedDict()
+
+        # no outputs = blank dict
+        if 0 == len(output_addrs):
+            return merged_addrs
+
+        # process the base case of the first input
+        entry = output_addrs[0]
+        merged_addrs[entry] = self._known_outputs[entry]
+
+        watermark = entry + self._known_outputs[entry]
+
+        # start merging overlapping input areas
+        for addr in output_addrs[1:]:
+            write_size = self._known_outputs[addr]
+
+            if addr >= watermark:
+                # Next output address is greater than addr+size of previous
+                # This means a new output "area" was found
+                merged_addrs[addr] = write_size
+                watermark = addr + write_size
+                entry = addr
+            else:
+                # This output address at least partially overlaps
+                # the previous output address. Merge them
+                if (addr + write_size) > watermark:
+                    new_watermark = addr + write_size
+                    merged_addrs[entry] = new_watermark - entry
+                    watermark = new_watermark
+                    # entry not updated since we extended the area
+                else:
+                    # This entry is entirely subsumed by the previous output area
+                    pass
+
+        return merged_addrs
 
     def get_inputs(self):
         # loop through inputs. Get ranges/bytes
@@ -432,6 +488,10 @@ class GodefroidProcess(microx.Process):
         assert isinstance(self._policy, InputMemoryPolicy)
         return self._policy.get_inputs()
 
+    def get_outputs(self):
+        assert isinstance(self._policy, InputMemoryPolicy)
+        return self._policy.get_outputs()
+
 
 if __name__ == "__main__":
 
@@ -539,4 +599,12 @@ if __name__ == "__main__":
     else:
         sys.stdout.write("[-] No inputs found\n")
     # Dump known outputs
+    outputs = p.get_outputs()
+
+    if len(outputs) > 0:
+        sys.stdout.write("[+] Found the following outputs:\n")
+        for (k, v) in outputs.items():
+            sys.stdout.write(f"\t{k:08x} - {k+v:08x}\n")
+    else:
+        sys.stdout.write("[-] No outputs found\n")
 
