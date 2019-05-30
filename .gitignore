@@ -2,3 +2,4 @@ build/
 third_party/
 __pycache__/
 microx/__pycache__/
+.vscode/ipch/*

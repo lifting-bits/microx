@@ -2,7 +2,7 @@
 # Copyright (c) 2019 Trail of Bits, Inc., all rights reserved.
 
 import microx
-from microx_core import InstructionFetchError
+from microx_core import InstructionFetchError # pylint: disable=no-name-in-module
 import traceback
 import logging
 import sys
