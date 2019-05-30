@@ -30,11 +30,11 @@
 #include "microx/Executor.h"
 
 #if PY_MAJOR_VERSION == 3
-# define PYTHON3
+#define PYTHON3
 #elif PY_MAJOR_VERSION == 2
-# define PYTHON2
+#define PYTHON2
 #else
-# error "Building for an unsupported Python version"
+#error "Building for an unsupported Python version"
 #endif
 
 namespace microx {
@@ -61,8 +61,7 @@ struct PythonExecutor : public Executor {
   bool ReadReg(const char *name, size_t size, RegRequestHint hint,
                Data &val) const override;
 
-  bool WriteReg(const char *name, size_t size,
-                const Data &val) const override;
+  bool WriteReg(const char *name, size_t size, const Data &val) const override;
 
   bool ReadMem(uintptr_t addr, size_t size, MemRequestHint hint,
                Data &val) const override;
@@ -73,7 +72,7 @@ struct PythonExecutor : public Executor {
 
   bool WriteFPU(const FPU &val) const override;
 
-  PyObject * const self;
+  PyObject *const self;
   mutable bool has_error{false};
   mutable PyObject *error{nullptr};
   mutable char error_message[512];
@@ -81,10 +80,9 @@ struct PythonExecutor : public Executor {
 
 // Python representation for an instance of an executor.
 struct PythonExecutorObject {
-  PyObject_HEAD
-  PythonExecutor *executor;
-  std::aligned_storage<sizeof(PythonExecutor),
-                       alignof(PythonExecutor)>::type impl;
+  PyObject_HEAD PythonExecutor *executor;
+  std::aligned_storage<sizeof(PythonExecutor), alignof(PythonExecutor)>::type
+      impl;
 };
 
 static int Executor_init(PyObject *self_, PyObject *args, PyObject *) {
@@ -111,9 +109,8 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
   size_t num_execs = 0;
 
   if (!PyArg_ParseTuple(args, "K", &num_execs)) {
-    PyErr_SetString(
-        PyExc_TypeError,
-        "Invalid value passed to 'execute' method.");
+    PyErr_SetString(PyExc_TypeError,
+                    "Invalid value passed to 'execute' method.");
     return nullptr;
   }
 
@@ -126,37 +123,32 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
       break;
 
     case ExecutorStatus::kErrorNotInitialized:
-      PyErr_SetString(
-          PyExc_ValueError,
-          "Micro-execution environment is not initialized.");
+      PyErr_SetString(PyExc_ValueError,
+                      "Micro-execution environment is not initialized.");
       return nullptr;
 
     case ExecutorStatus::kErrorDecode:
     case ExecutorStatus::kErrorUnsupportedCFI:
     case ExecutorStatus::kErrorUnsupportedStack:
     case ExecutorStatus::kErrorExecute:
-      PyErr_SetString(
-          PyExc_RuntimeError,
-          "Unable to micro-execute instruction.");
+      PyErr_SetString(PyExc_RuntimeError,
+                      "Unable to micro-execute instruction.");
       return nullptr;
 
     case ExecutorStatus::kErrorFault:
-      PyErr_SetString(
-          PyExc_RuntimeError,
-          "Instruction faulted during micro-execution.");
+      PyErr_SetString(PyExc_RuntimeError,
+                      "Instruction faulted during micro-execution.");
       return nullptr;
 
     case ExecutorStatus::kErrorFloatingPointException:
-      PyErr_SetString(
-          PyExc_FloatingPointError,
-          "Instruction faulted during micro-execution.");
+      PyErr_SetString(PyExc_FloatingPointError,
+                      "Instruction faulted during micro-execution.");
       return nullptr;
 
     case ExecutorStatus::kErrorReadInstMem:
       if (!PyErr_Occurred() && !self->executor->error) {
-        PyErr_SetString(
-            PyExc_RuntimeError,
-            "Could not read instruction bytes.");
+        PyErr_SetString(PyExc_RuntimeError,
+                        "Could not read instruction bytes.");
       }
       [[clang::fallthrough]];
 
@@ -169,10 +161,9 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
         self->executor->error = nullptr;
 
       } else {
-        PyErr_Format(
-            PyExc_RuntimeError,
-            "Unable to micro-execute instruction with status %u.",
-            static_cast<unsigned>(error_code));
+        PyErr_Format(PyExc_RuntimeError,
+                     "Unable to micro-execute instruction with status %u.",
+                     static_cast<unsigned>(error_code));
       }
       return nullptr;
   }
@@ -185,22 +176,18 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
 static PyTypeObject gExecutorType;
 
 static PyMethodDef gModuleMethods[] = {
-  {nullptr}  /* Sentinel */
+    {nullptr} /* Sentinel */
 };
 
 static PyMethodDef gExecutorMethods[] = {
-  {"execute",
-   Executor_Execute,
-   METH_VARARGS,
-   "Interpret a string of bytes as a machine instruction and perform a "
-   "micro-execution of the instruction."},
-  {nullptr}  /* Sentinel */
+    {"execute", Executor_Execute, METH_VARARGS,
+     "Interpret a string of bytes as a machine instruction and perform a "
+     "micro-execution of the instruction."},
+    {nullptr} /* Sentinel */
 };
 
 PythonExecutor::PythonExecutor(PyObject *self_, unsigned addr_size)
-    : Executor(addr_size),
-      self(self_),
-      error(nullptr) {}
+    : Executor(addr_size), self(self_), error(nullptr) {}
 
 PythonExecutor::~PythonExecutor(void) {}
 
@@ -210,9 +197,8 @@ static void WriteData(Data &data, T val) {
 }
 
 // Convert a Python value into a `Data` object.
-bool PythonExecutor::ReadValue(
-    PyObject *res, size_t num_bits, Data &val, const char *usage) const {
-
+bool PythonExecutor::ReadValue(PyObject *res, size_t num_bits, Data &val,
+                               const char *usage) const {
   if (has_error) {
     return false;
   }
@@ -223,11 +209,10 @@ bool PythonExecutor::ReadValue(
     if (num_bytes != res_size) {
       has_error = true;
       error = PyExc_ValueError;
-      snprintf(
-          error_message, sizeof(error_message),
-          "Incorrect number of bytes returned for value from '%s'; "
-          "wanted %zu bytes but got %zu bytes.",
-          usage, num_bytes, res_size);
+      snprintf(error_message, sizeof(error_message),
+               "Incorrect number of bytes returned for value from '%s'; "
+               "wanted %zu bytes but got %zu bytes.",
+               usage, num_bytes, res_size);
       return false;
     } else {
       memcpy(&(val.bytes[0]), PyBytes_AsString(res), num_bytes);
@@ -259,10 +244,9 @@ bool PythonExecutor::ReadValue(
     }
   } else {
     error = PyExc_TypeError;
-    snprintf(
-        error_message, sizeof(error_message),
-        "Cannot convert type '%s' into a byte sequence from '%s'.",
-        res->ob_type->tp_name, usage);
+    snprintf(error_message, sizeof(error_message),
+             "Cannot convert type '%s' into a byte sequence from '%s'.",
+             res->ob_type->tp_name, usage);
     return false;
   }
   memset(&(val.bytes[num_bytes]), 0, sizeof(val) - num_bytes);
@@ -280,17 +264,18 @@ uintptr_t PythonExecutor::ComputeAddress(const char *seg_name, uintptr_t base,
   }
 
   char usage[256];
-  auto res = PyObject_CallMethod(self, "compute_address", "(s,K,K,K,K,I,i)",
-                                 seg_name, base, index, scale, displacement,
-                                 size / 8, hint);
+  auto res =
+      PyObject_CallMethod(self, "compute_address", "(s,K,K,K,K,I,i)", seg_name,
+                          base, index, scale, displacement, size / 8, hint);
 
-  auto ret_addr = this->Executor::ComputeAddress(
-      seg_name, base, index, scale, displacement, size, hint);
+  auto ret_addr = this->Executor::ComputeAddress(seg_name, base, index, scale,
+                                                 displacement, size, hint);
 
   if (res) {
-    sprintf(usage, "compute_address(\"%s\", 0x%08" PRIx64 ", 0x%08" PRIx64
-            ", 0x%08" PRIx64 ", 0x%08" PRIx64 ", %lu, %d)", seg_name,
-            static_cast<uint64_t>(base), static_cast<uint64_t>(index),
+    sprintf(usage,
+            "compute_address(\"%s\", 0x%08" PRIx64 ", 0x%08" PRIx64
+            ", 0x%08" PRIx64 ", 0x%08" PRIx64 ", %lu, %d)",
+            seg_name, static_cast<uint64_t>(base), static_cast<uint64_t>(index),
             static_cast<uint64_t>(scale), static_cast<uint64_t>(displacement),
             size / 8, hint);
     Data val;
@@ -310,8 +295,8 @@ uintptr_t PythonExecutor::ComputeAddress(const char *seg_name, uintptr_t base,
 
 // Read a register from the environment. The name of the register should make
 // the size explicit.
-bool PythonExecutor::ReadReg(const char *name, size_t size,
-                             RegRequestHint hint, Data &val) const {
+bool PythonExecutor::ReadReg(const char *name, size_t size, RegRequestHint hint,
+                             Data &val) const {
   if (has_error) {
     return false;
   }
@@ -346,15 +331,15 @@ bool PythonExecutor::WriteReg(const char *name, size_t size,
   return nullptr != ret;
 }
 
-bool PythonExecutor::ReadMem(uintptr_t addr, size_t size,
-                             MemRequestHint hint, Data &val) const {
+bool PythonExecutor::ReadMem(uintptr_t addr, size_t size, MemRequestHint hint,
+                             Data &val) const {
   if (has_error) {
     return false;
   }
 
   char usage[256];
-  auto res = PyObject_CallMethod(
-      self, "read_memory", "(K,I,i)", addr, size / 8, hint);
+  auto res =
+      PyObject_CallMethod(self, "read_memory", "(K,I,i)", addr, size / 8, hint);
   if (res) {
     sprintf(usage, "read_memory(0x%08" PRIx64 ", %lu, %d)",
             static_cast<uint64_t>(addr), (size / 8), hint);
@@ -378,7 +363,7 @@ bool PythonExecutor::WriteMem(uintptr_t addr, size_t size,
 #elif defined(PYTHON2)
       self, "write_memory", "(K,s#)", addr, val.bytes, size / 8);
 #else
-# error "Unsupported Python"
+#error "Unsupported Python"
 #endif
   Py_XDECREF(ret);
   return nullptr != ret;
@@ -395,9 +380,8 @@ bool PythonExecutor::ReadFPU(FPU &val) const {
       Py_DECREF(res);
       has_error = true;
       error = PyExc_ValueError;
-      snprintf(
-          error_message, sizeof(error_message),
-          "Expected 'read_fpu' to return string.");
+      snprintf(error_message, sizeof(error_message),
+               "Expected 'read_fpu' to return string.");
       return false;
     }
     auto res_size = static_cast<size_t>(PyBytes_Size(res));
@@ -438,36 +422,33 @@ struct module_state {
 };
 
 static struct PyModuleDef gModuleDef = {
-  PyModuleDef_HEAD_INIT,
-  "microx_core",
-  "x86 and x86-64 micro-execution support.",
-  sizeof(struct module_state),
-  gModuleMethods,
-  nullptr,
-  nullptr,
-  nullptr,
-  nullptr
-};
+    PyModuleDef_HEAD_INIT,
+    "microx_core",
+    "x86 and x86-64 micro-execution support.",
+    sizeof(struct module_state),
+    gModuleMethods,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr};
 #endif
 
 #ifdef PYTHON3
-# define RETURN_ERROR return nullptr
-# define RETURN_OK(x) return x
+#define RETURN_ERROR return nullptr
+#define RETURN_OK(x) return x
 #elif defined(PYTHON2)
-# define RETURN_ERROR return
-# define RETURN_OK(x) return
+#define RETURN_ERROR return
+#define RETURN_OK(x) return
 #else
-# error "Unsupported Python version"
+#error "Unsupported Python version"
 #endif
 
 #ifdef PYTHON3
-PyMODINIT_FUNC
-PyInit_microx_core(void) {
+PyMODINIT_FUNC PyInit_microx_core(void) {
 #elif defined(PYTHON2)
-PyMODINIT_FUNC
-initmicrox_core(void) {
+PyMODINIT_FUNC initmicrox_core(void) {
 #else
-# error "Unsupported Python version"
+#error "Unsupported Python version"
 #endif
   if (!Executor::Init()) {
     RETURN_ERROR;
@@ -476,10 +457,8 @@ initmicrox_core(void) {
 #ifdef PYTHON3
   auto m = PyModule_Create(&gModuleDef);
 #elif defined(PYTHON2)
-  auto m = Py_InitModule3(
-      "microx_core",
-      gModuleMethods,
-      "x86 and x86-64 micro-execution support.");
+  auto m = Py_InitModule3("microx_core", gModuleMethods,
+                          "x86 and x86-64 micro-execution support.");
 #endif
   if (!m) {
     RETURN_ERROR;
@@ -504,10 +483,10 @@ initmicrox_core(void) {
   }
 
   Py_INCREF(&gExecutorType);
-  PyModule_AddObject(
-      m, "Executor", reinterpret_cast<PyObject *>(&gExecutorType));
+  PyModule_AddObject(m, "Executor",
+                     reinterpret_cast<PyObject *>(&gExecutorType));
   RETURN_OK(m);
-}
+}  // namespace
 
 }  // namespace
 }  // namespace microx
