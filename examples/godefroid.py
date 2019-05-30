@@ -2,12 +2,15 @@
 # Copyright (c) 2019 Trail of Bits, Inc., all rights reserved.
 
 import microx
+from microx_core import InstructionFetchError
 import traceback
 import logging
 import sys
 import secrets
+import collections
 
 from flags import Flags
+from enum import Enum
 
 
 class MemoryFlags(Flags):
@@ -188,6 +191,11 @@ class PolicyMemoryMap(FlaggedMemoryMap):
     self._store_policy(addr, len(data))
     return self._store_bytes(addr, data)
 
+class InputType(Enum):
+  DATA = 0
+  POINTER = 1
+  COMPUTED = 2
+
 class InputMemoryPolicy():
 
   #TODO(artem): Make this a configurable value or based on address size
@@ -210,6 +218,9 @@ class InputMemoryPolicy():
     assert self._pointers_start < self._pointers_end
 
     self._pointer_watermark = self._pointers_start
+    
+    # maps address (such as stack) -> where it points to (in "heap")
+    self._pointer_map = {}
 
   def pointer_to_bytes(self, ptr):
     return int(ptr).to_bytes(self._address_size, byteorder='little')
@@ -225,13 +236,10 @@ class InputMemoryPolicy():
     assert self._pointer_watermark < self._pointers_end
     sys.stdout.write("Generating a pointer going to {:08x} in pointer space\n".format(new_ptr))
 
-    # Add a placeholder size of size 0, indicating this pointer has never been
-    # dereferenced or used in computation
-    # This size prevents it from being re-used as another pointer
-    self._known_inputs[new_ptr] = 0 
-    return self.pointer_to_bytes(new_ptr)
+    return new_ptr
 
   def generate_random(self, size):
+    #NOTE(artem): Consider a seeded random for reproducability
     return secrets.token_bytes(size)
 
   def handle_store(self, addr):
@@ -243,7 +251,6 @@ class InputMemoryPolicy():
       # This address is outside policy bounds
       return False
 
-
   def handle_load(self, addr):
     if (self._start         <= addr <= self._end        ) or \
        (self._pointers_start <= addr <= self._pointers_end):
@@ -254,21 +261,22 @@ class InputMemoryPolicy():
       return False
 
   def read_before_write(self, addr, size, data):
-    sys.stdout.write("Input mem: Read before write of {:x} - {:x}\n".format(addr, addr+size))
+    sys.stdout.write(f"Read-before-write of {size} bytes\n")
+    sys.stdout.write(f" at {addr:08x} [{addr:08x} - {addr+size:08x}]\n")
     new_data = data
+    #TODO(artem): Check if this address+size has been previously read
     if self._address_size == size:
       # when reading a pointer size, at first, always assume the value is a pointer
       # and generate a pointer into pointer space aka ("heap")
-      new_data = self.generate_pointer()
-      sys.stdout.write("Found pointer input at {:08x} - {:08x}\n".format(addr, addr+size))
-      # Mark the memory cell containing this pointer
-      self._known_inputs[addr] = self._address_size
+      ptr = self.generate_pointer()
+      self._pointer_map[addr] = ptr
+      new_data = self.pointer_to_bytes(ptr)
     else:
       # When reading a non-pointer size, return a random value
-      sys.stdout.write("Found input at {:08x} - {:08x}\n".format(addr, addr+size))
       new_data = self.generate_random(size)
-      # Mark the memory cell containing this pointer as used
-      self._known_inputs[addr] = size
+
+    # Mark the memory cell containing this value as used
+    self._known_inputs[addr] = size
 
     assert len(data) == len(new_data)
 
@@ -277,6 +285,62 @@ class InputMemoryPolicy():
   def write_before_read(self, addr, size, data):
     sys.stdout.write("Write before read of {:x} - {:x}\n".format(addr, addr+size))
     return data
+
+  def _make_itype(self, addr, size):
+    ptr = self.get_pointer(addr)
+    if ptr is not None:
+      return (size, InputType.POINTER, ptr)
+    elif size != 0:
+      #TODO(artem): Keep track of initial values returned
+      return (size, InputType.DATA, 0)
+    elif size == 0:
+      return (size, InputType.COMPUTED, 0)
+
+
+  def get_inputs(self):
+    # loop through inputs. Get ranges/bytes
+    input_addrs = sorted(self._known_inputs.keys())
+
+    # return an ordered dict of
+    # address : size of input area
+    merged_addrs = collections.OrderedDict()
+
+    # no inputs = blank dict
+    if 0 == len(input_addrs):
+      return merged_addrs
+
+    # process the base case of the first input
+    entry = input_addrs[0]
+    merged_addrs[entry] = self._make_itype(entry, self._known_inputs[entry])
+    watermark = entry + self._known_inputs[entry]
+
+    # start merging overlapping input areas
+    for addr in input_addrs[1:] :
+      read_size = self._known_inputs[addr]
+
+      if addr >= watermark:
+        # Next input address is greater than addr+size of previous
+        # This means a new input "area" was found
+        merged_addrs[addr] = self._make_itype(addr, read_size)
+        watermark = addr + read_size
+        entry = addr
+      else:
+        # This input address at least partially overlaps
+        # the previous input address. Merge them
+        if (addr + read_size) > watermark:
+          new_watermark = addr + read_size
+          merged_addrs[entry] = self._make_itype(addr, new_watermark - entry)
+          watermark = new_watermark
+          # entry not updated since we extended the area
+        else:
+          # This entry is entirely subsumed by the previous input area
+          pass
+
+    return merged_addrs
+
+  def get_pointer(self, addr):
+    # Return address it points to, or None if not a pointer
+    return self._pointer_map.get(addr, None)
 
 class GodefroidProcess(microx.Process):
   def __init__(self, ops, memory, sp_value):
@@ -289,7 +353,7 @@ class GodefroidProcess(microx.Process):
     heap_start =   0x0F80000
     heap_end   =   0x1FF0000
     heaps = PolicyMemoryMap(o, heap_start, heap_end, MemoryFlags.Read | MemoryFlags.Write,
-        DefaultMemoryPolicy(),
+        DefaultMemoryPolicy(), # DefaultPolicy is only temporary, see below
         mapname="[heap]")
 
     memory.add_map(heaps)
@@ -301,11 +365,12 @@ class GodefroidProcess(microx.Process):
     heaps = list(memory.find_maps_by_name("[heap]"))
     assert len(heaps) == 1
 
-    function_stack_start = sp_value
+    # adjust function stack by the pushed return address
+    function_stack_start = sp_value+(memory.address_size_bits() // 8)
     assert stacks[0].base() <= function_stack_start <= stacks[0].limit()
 
     # assumes stacks grow down
-    input_policy = InputMemoryPolicy(32,  #32 bit addresses
+    input_policy = InputMemoryPolicy(memory.address_size_bits(),
         (function_stack_start, stacks[0].limit(),), # argument space
         (heaps[0].base(), heaps[0].limit(),) # pointer space
       )
@@ -318,11 +383,17 @@ class GodefroidProcess(microx.Process):
     for h in heaps:
       h.attach_policy(input_policy)
 
+    self._policy = input_policy
+
   def compute_address(self, seg_name, base_addr, index, scale, disp, size, hint):
     addr = super(GodefroidProcess, self).compute_address(seg_name, base_addr, index, scale, disp, size, hint)
     sys.stdout.write("Computing: {:08x} | {:08x} | {:08x} | {:08x}\n".format(
       base_addr, index, scale, disp))
     return addr
+
+  def get_inputs(self):
+    assert isinstance(self._policy, InputMemoryPolicy)
+    return self._policy.get_inputs()
 
 
 if __name__ == "__main__":
@@ -356,23 +427,68 @@ if __name__ == "__main__":
       DefaultMemoryPolicy(), # attach an InputMemoryPolicy later
       mapname="[stack]")
 
+
   m = microx.Memory(o, 32)
   m.add_map(code)
   m.add_map(stack)
 
   t = microx.Thread(o)
-  t.write_register('EIP', 0x1000)
-  t.write_register('ESP', 0x81000)
 
-  p = GodefroidProcess(o, m, sp_value=0x81000)
+  RETURN_ADDRESS_MAGIC = 0xfeedf00d
+  pc = 0x1000
+  esp = 0x81000
 
+  # write our "magic return address" to the stack
+  stack.store_bytes(esp, 
+      RETURN_ADDRESS_MAGIC.to_bytes(
+        m.address_size_bits() // 8, 
+        byteorder='little'))
+  
+  sys.stdout.write(f"[+] Initial EIP is: {pc:08x}\n")
+  sys.stdout.write(f"[+] Initial ESP is: {esp:08x}\n")
+
+  t.write_register('EIP', pc)
+  t.write_register('ESP', esp)
+
+  p = GodefroidProcess(o, m, sp_value=esp)
+
+  instruction_count = 0
   try:
     while True:
-      pc = t.read_register('EIP', t.REG_HINT_PROGRAM_COUNTER)
-      pc_int = o.convert_to_integer(pc)
-      print("Emulating instruction at {:08x}".format(pc_int))
-      p.execute(t, 1)
+      pc_bytes = t.read_register('EIP', t.REG_HINT_PROGRAM_COUNTER)
+      pc = o.convert_to_integer(pc_bytes)
+      if RETURN_ADDRESS_MAGIC == pc:
+        sys.stdout.write("[+] Reached return address. Stopping\n")
+        break
+      else:
+        sys.stdout.write(f"[+] Emulating instruction at: {pc:08x}\n")
+        p.execute(t, 1)
+        instruction_count += 1
+  except InstructionFetchError:
+    sys.stdout.write(f"[!] Could not fetch instruction at: {pc:08x}. Ending run.\n")
   except Exception as e:
     print(e)
     print(traceback.format_exc())
 
+  # Stats
+  sys.stdout.write(f"[+] Executed {instruction_count} instructions\n")
+  # Dump known inputs
+  inputs = p.get_inputs()
+
+  if len(inputs) > 0:
+    sys.stdout.write("[+] Found  the following inputs:\n")
+    for (k,v) in inputs.items():
+      input_size, input_type, input_data = v
+      sys.stdout.write(f"\t{k:08x} - {k+input_size:08x} [size: {input_size}]")
+      if InputType.POINTER == input_type:
+        sys.stdout.write(f" [POINTER TO: {input_data:08x}]")
+      elif InputType.DATA == input_type:
+        sys.stdout.write(" [DATA]")
+      elif InputType.COMPUTED == input_type:
+        sys.stdout.write(" [COMPUTED]")
+      else:
+        assert "Unknown input type"
+      sys.stdout.write("\n")
+  else:
+    sys.stdout.write("[-] No inputs found\n")
+  # Dump known outputs
