@@ -64,7 +64,6 @@ enum class MemRequestHint {
   kAddressGeneration
 };
 
-
 // TODO(pag): Assumes little endian.
 struct float80_t final {
   uint8_t data[10];
@@ -77,20 +76,20 @@ struct vec128_t final {
 union FPUStatusWord final {
   uint16_t flat;
   struct {
-    uint16_t ie:1;  // Invalid operation.
-    uint16_t de:1;  // Denormal operand.
-    uint16_t ze:1;  // Zero divide.
-    uint16_t oe:1;  // Overflow.
-    uint16_t ue:1;  // Underflow.
-    uint16_t pe:1;  // Precision.
-    uint16_t sf:1;  // Stack fault.
-    uint16_t es:1;  // Error summary status.
-    uint16_t c0:1;  // Part of condition code.
-    uint16_t c1:1;  // Used for a whole lot of stuff.
-    uint16_t c2:1;  // Part of condition code.
-    uint16_t top:3;  // Stack pointer.
-    uint16_t c3:1;  // Part of condition code.
-    uint16_t b:1;  // Busy.
+    uint16_t ie : 1;   // Invalid operation.
+    uint16_t de : 1;   // Denormal operand.
+    uint16_t ze : 1;   // Zero divide.
+    uint16_t oe : 1;   // Overflow.
+    uint16_t ue : 1;   // Underflow.
+    uint16_t pe : 1;   // Precision.
+    uint16_t sf : 1;   // Stack fault.
+    uint16_t es : 1;   // Error summary status.
+    uint16_t c0 : 1;   // Part of condition code.
+    uint16_t c1 : 1;   // Used for a whole lot of stuff.
+    uint16_t c2 : 1;   // Part of condition code.
+    uint16_t top : 3;  // Stack pointer.
+    uint16_t c3 : 1;   // Part of condition code.
+    uint16_t b : 1;    // Busy.
   } __attribute__((packed));
 } __attribute__((packed));
 
@@ -113,10 +112,7 @@ enum FPURoundingControl : uint16_t {
   kFPURoundToZero
 };
 
-enum FPUInfinityControl : uint16_t {
-  kInfinityProjective,
-  kInfinityAffine
-};
+enum FPUInfinityControl : uint16_t { kInfinityProjective, kInfinityAffine };
 
 #else
 using FPUPrecisionControl = uint16_t;
@@ -127,17 +123,17 @@ using FPUInfinityControl = uint16_t;
 union FPUControlWord final {
   uint16_t flat;
   struct {
-    uint16_t im:1;  // Invalid Operation.
-    uint16_t dm:1;  // Denormalized Operand.
-    uint16_t zm:1;  // Zero Divide.
-    uint16_t om:1;  // Overflow.
-    uint16_t um:1;  // Underflow.
-    uint16_t pm:1;  // Precision.
-    uint16_t _rsvd0:2;
-    FPUPrecisionControl pc:2;  // bit 8
-    FPURoundingControl rc:2;
-    FPUInfinityControl x:1;
-    uint16_t _rsvd1:3;
+    uint16_t im : 1;  // Invalid Operation.
+    uint16_t dm : 1;  // Denormalized Operand.
+    uint16_t zm : 1;  // Zero Divide.
+    uint16_t om : 1;  // Overflow.
+    uint16_t um : 1;  // Underflow.
+    uint16_t pm : 1;  // Precision.
+    uint16_t _rsvd0 : 2;
+    FPUPrecisionControl pc : 2;  // bit 8
+    FPURoundingControl rc : 2;
+    FPUInfinityControl x : 1;
+    uint16_t _rsvd1 : 3;
   } __attribute__((packed));
 } __attribute__((packed));
 
@@ -173,23 +169,23 @@ static_assert(16 == sizeof(FPUStackElem),
 union FPUControlStatus {
   uint32_t flat;
   struct {
-    uint32_t ie:1;  // Invalid operation.
-    uint32_t de:1;  // Denormal flag.
-    uint32_t ze:1;  // Divide by zero.
-    uint32_t oe:1;  // Overflow.
-    uint32_t ue:1;  // Underflow.
-    uint32_t pe:1;  // Precision.
-    uint32_t daz:1;  // Denormals are zero.
-    uint32_t im:1;  // Invalid operation.
-    uint32_t dm:1;  // Denormal mask.
-    uint32_t zm:1;  // Divide by zero mask.
-    uint32_t om:1;  // Overflow mask.
-    uint32_t um:1;  // Underflow mask.
-    uint32_t pm:1;  // Precision mask.
-    uint32_t rn:1;  // Round negative.
-    uint32_t rp:1;  // Round positive.
-    uint32_t fz:1;  // Flush to zero.
-    uint32_t _rsvd:16;
+    uint32_t ie : 1;   // Invalid operation.
+    uint32_t de : 1;   // Denormal flag.
+    uint32_t ze : 1;   // Divide by zero.
+    uint32_t oe : 1;   // Overflow.
+    uint32_t ue : 1;   // Underflow.
+    uint32_t pe : 1;   // Precision.
+    uint32_t daz : 1;  // Denormals are zero.
+    uint32_t im : 1;   // Invalid operation.
+    uint32_t dm : 1;   // Denormal mask.
+    uint32_t zm : 1;   // Divide by zero mask.
+    uint32_t om : 1;   // Overflow mask.
+    uint32_t um : 1;   // Underflow mask.
+    uint32_t pm : 1;   // Precision mask.
+    uint32_t rn : 1;   // Round negative.
+    uint32_t rp : 1;   // Round positive.
+    uint32_t fz : 1;   // Flush to zero.
+    uint32_t _rsvd : 16;
   } __attribute__((packed));
 } __attribute__((packed));
 
@@ -204,10 +200,7 @@ enum FPUTag : uint16_t {
   kFPUTagEmpty
 };
 
-enum FPUAbridgedTag : uint8_t {
-  kFPUAbridgedTagEmpty,
-  kFPUAbridgedTagValid
-};
+enum FPUAbridgedTag : uint8_t { kFPUAbridgedTagEmpty, kFPUAbridgedTagValid };
 #else
 using FPUTag = uint16_t;
 using FPUAbridgedTag = uint8_t;
@@ -217,14 +210,14 @@ using FPUAbridgedTag = uint8_t;
 union FPUTagWord final {
   uint16_t flat;
   struct {
-    FPUTag tag0:2;
-    FPUTag tag1:2;
-    FPUTag tag2:2;
-    FPUTag tag3:2;
-    FPUTag tag4:2;
-    FPUTag tag5:2;
-    FPUTag tag6:2;
-    FPUTag tag7:2;
+    FPUTag tag0 : 2;
+    FPUTag tag1 : 2;
+    FPUTag tag2 : 2;
+    FPUTag tag3 : 2;
+    FPUTag tag4 : 2;
+    FPUTag tag5 : 2;
+    FPUTag tag6 : 2;
+    FPUTag tag7 : 2;
   } __attribute__((packed));
 } __attribute__((packed));
 
@@ -235,14 +228,14 @@ static_assert(sizeof(FPUTagWord) == 2,
 union FPUAbridgedTagWord final {
   uint8_t flat;
   struct {
-    FPUAbridgedTag r0:1;
-    FPUAbridgedTag r1:1;
-    FPUAbridgedTag r2:1;
-    FPUAbridgedTag r3:1;
-    FPUAbridgedTag r4:1;
-    FPUAbridgedTag r5:1;
-    FPUAbridgedTag r6:1;
-    FPUAbridgedTag r7:1;
+    FPUAbridgedTag r0 : 1;
+    FPUAbridgedTag r1 : 1;
+    FPUAbridgedTag r2 : 1;
+    FPUAbridgedTag r3 : 1;
+    FPUAbridgedTag r4 : 1;
+    FPUAbridgedTag r5 : 1;
+    FPUAbridgedTag r6 : 1;
+    FPUAbridgedTag r7 : 1;
   } __attribute__((packed));
 } __attribute__((packed));
 
@@ -269,9 +262,9 @@ using TableIndicator = uint16_t;
 union SegmentSelector final {
   uint16_t flat;
   struct {
-    RequestPrivilegeLevel rpi:2;
-    TableIndicator ti:1;
-    uint16_t index:13;
+    RequestPrivilegeLevel rpi : 2;
+    TableIndicator ti : 1;
+    uint16_t index : 13;
   } __attribute__((packed));
 } __attribute__((packed));
 
@@ -285,11 +278,11 @@ struct FpuFSAVE {
   FPUStatusWord swd;
   uint16_t _rsvd1;
   FPUTagWord ftw;
-  uint16_t fop;  // Last instruction opcode.
-  uint32_t ip;  // Offset in segment of last non-control FPU instruction.
+  uint16_t fop;        // Last instruction opcode.
+  uint32_t ip;         // Offset in segment of last non-control FPU instruction.
   SegmentSelector cs;  // Code segment associated with `ip`.
   uint16_t _rsvd2;
-  uint32_t dp;  // Operand address.
+  uint32_t dp;         // Operand address.
   SegmentSelector ds;  // Data segment associated with `dp`.
   uint16_t _rsvd3;
   FPUStackElem st[8];
@@ -301,11 +294,11 @@ struct FpuFXSAVE {
   FPUStatusWord swd;
   FPUAbridgedTagWord ftw;
   uint8_t _rsvd0;
-  uint16_t fop;  // Last instruction opcode.
-  uint32_t ip;  // Offset in segment of last non-control FPU instruction.
+  uint16_t fop;        // Last instruction opcode.
+  uint32_t ip;         // Offset in segment of last non-control FPU instruction.
   SegmentSelector cs;  // Code segment associated with `ip`.
   uint16_t _rsvd1;
-  uint32_t dp;  // Operand address.
+  uint32_t dp;         // Operand address.
   SegmentSelector ds;  // Data segment associated with `dp`.
   uint16_t _rsvd2;
   FPUControlStatus mxcsr;
@@ -321,8 +314,8 @@ struct FpuFXSAVE64 {
   FPUAbridgedTagWord ftw;
   uint8_t _rsvd0;
   uint16_t fop;  // Last instruction opcode.
-  uint64_t ip;  // Offset in segment of last non-control FPU instruction.
-  uint64_t dp;  // Operand address.
+  uint64_t ip;   // Offset in segment of last non-control FPU instruction.
+  uint64_t dp;   // Operand address.
   FPUControlStatus mxcsr;
   FPUControlStatus mxcsr_mask;
   FPUStackElem st[8];
@@ -350,13 +343,13 @@ static_assert(512 == sizeof(FPU), "Invalid structure packing of `FPU`.");
 
 class Executor {
  public:
-  Executor(size_t addr_size_, bool has_avx_=false, bool has_avx512_=false);
+  Executor(size_t addr_size_, bool has_avx_ = false, bool has_avx512_ = false);
 
   virtual ~Executor(void);
 
   static bool Init(void);
 
-  ExecutorStatus Execute(size_t max_num_executions=1);
+  ExecutorStatus Execute(size_t max_num_executions = 1);
 
   virtual uintptr_t ComputeAddress(const char *seg_name, uintptr_t base,
                                    uintptr_t index, uintptr_t scale,
@@ -369,11 +362,10 @@ class Executor {
   virtual bool WriteReg(const char *name, size_t size,
                         const Data &val) const = 0;
 
-  virtual bool ReadMem(uintptr_t addr, size_t size,
-                       MemRequestHint hint, Data &val) const = 0;
+  virtual bool ReadMem(uintptr_t addr, size_t size, MemRequestHint hint,
+                       Data &val) const = 0;
 
-  virtual bool WriteMem(uintptr_t addr, size_t size,
-                        const Data &val) const = 0;
+  virtual bool WriteMem(uintptr_t addr, size_t size, const Data &val) const = 0;
 
   virtual bool ReadFPU(FPU &val) const = 0;
 
