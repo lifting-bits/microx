@@ -510,7 +510,7 @@ initmicrox_core(void) {
 
 
 	InstructionFetchError = PyErr_NewException(
-			"microx.InstructionFetchError", nullptr, nullptr);
+			"microx_core.InstructionFetchError", nullptr, nullptr);
 	if (nullptr == InstructionFetchError) {
 			RETURN_ERROR;
 	}
