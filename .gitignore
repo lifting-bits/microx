@@ -3,3 +3,4 @@ third_party/
 __pycache__/
 microx/__pycache__/
 .vscode/ipch/*
+.vscode/settings.json

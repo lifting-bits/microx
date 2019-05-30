@@ -2,7 +2,7 @@
 # Copyright (c) 2019 Trail of Bits, Inc., all rights reserved.
 
 import microx
-from microx_core import InstructionFetchError # pylint: disable=no-name-in-module
+from microx_core import InstructionFetchError  # pylint: disable=no-name-in-module
 import traceback
 import logging
 import sys
@@ -145,7 +145,7 @@ class PolicyMemoryMap(FlaggedMemoryMap):
             self._access_map[addr + i] = flag_list[i]
 
     def _load_unit(self, addr, size):
-        sys.stdout.write("Load size({:d}) at {:x}\n".format(size, addr))
+        #sys.stdout.write("Load size({:d}) at {:x}\n".format(size, addr))
         self._load_policy(addr, size)
         offset = addr - self._base
         return self._ops.convert_to_byte_string(self._data[offset : (offset + size)])
@@ -352,6 +352,24 @@ class InputMemoryPolicy:
         # Return address it points to, or None if not a pointer
         return self._pointer_map.get(addr, None)
 
+    def handle_compute(self, result, base, scale, index, disp):
+
+        parts = (base, scale, index, disp)
+
+        for p in parts:
+            # NOTE(artem): the check for input address zero is here purely for sanity checking
+            if p in self._known_inputs and p != 0:
+                sys.stdout.write(
+                    f"Input Address: {p:08x} used to compute {result:08x}\n"
+                )
+                sys.stdout.write(f"\tAdding {result:08x} to inputs")
+
+                # Add a new 'computed' input address
+                self._known_inputs[result] = 0
+                break
+
+        return result
+
 
 class GodefroidProcess(microx.Process):
     def __init__(self, ops, memory, sp_value):
@@ -403,14 +421,11 @@ class GodefroidProcess(microx.Process):
         self._policy = input_policy
 
     def compute_address(self, seg_name, base_addr, index, scale, disp, size, hint):
-        addr = super(GodefroidProcess, self).compute_address(
+        result = super(GodefroidProcess, self).compute_address(
             seg_name, base_addr, index, scale, disp, size, hint
         )
-        sys.stdout.write(
-            "Computing: {:08x} | {:08x} | {:08x} | {:08x}\n".format(
-                base_addr, index, scale, disp
-            )
-        )
+        assert isinstance(self._policy, InputMemoryPolicy)
+        addr = self._policy.handle_compute(result, base_addr, index, scale, disp)
         return addr
 
     def get_inputs(self):
@@ -508,7 +523,7 @@ if __name__ == "__main__":
     inputs = p.get_inputs()
 
     if len(inputs) > 0:
-        sys.stdout.write("[+] Found  the following inputs:\n")
+        sys.stdout.write("[+] Found the following inputs:\n")
         for (k, v) in inputs.items():
             input_size, input_type, input_data = v
             sys.stdout.write(f"\t{k:08x} - {k+input_size:08x} [size: {input_size}]")
