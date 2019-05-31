@@ -407,22 +407,52 @@ class InputMemoryPolicy:
     def get_pointer(self, addr):
         # Return address it points to, or None if not a pointer
         return self._pointer_map.get(addr, None)
+    
+    def in_input_range(self, addr):
 
-    def handle_compute(self, result, base, scale, index, disp):
+        # is it a known input? 
+        if addr in self._known_inputs:
+            return True
+
+        # is it a pointer to the input heap?
+        if self._pointers_start <= addr < self._pointers_end:
+
+            if addr > self._pointer_watermark:
+                self._pointer_watermark += InputMemoryPolicy.POINTER_INCREMENT
+                assert self._pointer_watermark < self._pointers_end
+
+            return True
+
+        # is it on the stack?
+        if self._start <= addr < self._end:
+
+            return True
+
+        # Its probably not an input
+        return False
+
+    def handle_compute(self, result, base, scale, index, disp, size, hint):
 
         parts = (base, scale, index, disp)
 
-        for p in parts:
-            # NOTE(artem): the check for input address zero is here purely for sanity checking
-            if p in self._known_inputs and p != 0:
-                sys.stdout.write(
-                    f"Input Address: {p:08x} used to compute {result:08x}\n"
-                )
-                sys.stdout.write(f"\tAdding {result:08x} to inputs")
+        if self.in_input_range(result):
+            # Computed address is an input range, mark it as input
+            self._known_inputs[result] = size
+        else:
+            #TODO(artem): This code may not be necessary
+            # Is the address computed from an input address?
+            for p in parts:
+                # NOTE(artem): the check for input address zero is here purely for sanity checking
+                if p in self._known_inputs and p != 0:
+                    sys.stdout.write(
+                        f"Input Address: {p:08x} used to compute {result:08x}\n"
+                    )
+                    sys.stdout.write(f"\tAdding {result:08x} to inputs")
 
-                # Add a new 'computed' input address
-                self._known_inputs[result] = 0
-                break
+                    # Add a new 'computed' input address
+                    self._known_inputs[result] = size
+                    sys.stdout.write("!!! Failed in_input_range but computed from known input\n")
+                    break
 
         return result
 
@@ -481,7 +511,7 @@ class GodefroidProcess(microx.Process):
             seg_name, base_addr, index, scale, disp, size, hint
         )
         assert isinstance(self._policy, InputMemoryPolicy)
-        addr = self._policy.handle_compute(result, base_addr, index, scale, disp)
+        addr = self._policy.handle_compute(result, base_addr, index, scale, disp, size, hint)
         return addr
 
     def get_inputs(self):
