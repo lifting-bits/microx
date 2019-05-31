@@ -4,6 +4,7 @@
 import collections
 import sys
 import struct
+import itertools
 
 from microx_core import Executor  # pylint: disable=no-name-in-module
 
@@ -344,6 +345,29 @@ class Memory(object):
         self._address_mask = (1 << self._address_size) - 1
         self._page_shift = page_shift
         self._memory_maps = collections.defaultdict(MemoryMap)
+
+    def find_hole(self, hole_size):
+        """ Finds a hole of size `hole_size` between current mappings """
+
+        paged_hole = hole_size >> self._page_shift
+        if 0 == paged_hole:
+            paged_hole = 1
+
+        MIN_ADDR = 0x10000 >> self._page_shift
+        MAX_ADDR = 0xFFFF0000 >> self._page_shift
+
+        mm = sorted(self._memory_maps.keys())
+
+        lowest = MIN_ADDR
+        for addr in mm:
+            if addr > lowest and lowest - addr > paged_hole:
+                return lowest << self._page_shift
+            lowest = addr
+        
+        if addr < MAX_ADDR and MAX_ADDR - addr > paged_hole:
+            return addr << self._page_shift
+        
+        return None
 
     def find_maps_by_name(self, map_name):
 
