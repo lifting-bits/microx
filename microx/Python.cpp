@@ -278,7 +278,9 @@ uintptr_t PythonExecutor::ComputeAddress(const char *seg_name, uintptr_t base,
     sprintf(usage,
             "compute_address(\"%s\", 0x%08" PRIx64 ", 0x%08" PRIx64
             ", 0x%08" PRIx64 ", 0x%08" PRIx64 ", %lu, %d)",
-            seg_name, base, index, scale, displacement, size / 8, hint);
+            seg_name, static_cast<uint64_t>(base), static_cast<uint64_t>(index),
+            static_cast<uint64_t>(scale), static_cast<uint64_t>(displacement),
+            size / 8, hint);
     Data val;
     auto ret = ReadValue(res, addr_size, val, usage);
     Py_DECREF(res);
@@ -342,8 +344,8 @@ bool PythonExecutor::ReadMem(uintptr_t addr, size_t size, MemRequestHint hint,
   auto res =
       PyObject_CallMethod(self, "read_memory", "(K,I,i)", addr, size / 8, hint);
   if (res) {
-    sprintf(usage, "read_memory(0x%08" PRIx64 ", %lu, %d)", addr, (size / 8),
-            hint);
+    sprintf(usage, "read_memory(0x%08" PRIx64 ", %lu, %d)",
+            static_cast<uint64_t>(addr), (size / 8), hint);
     auto ret = ReadValue(res, size, val, usage);
     Py_DECREF(res);
     return ret;

@@ -31,7 +31,7 @@ if __name__ == "__main__":
     m.add_map(code)
     m.add_map(stack)
 
-    t = microx.Thread(o)
+    t = microx.EmptyThread(o)
     t.write_register("EIP", 0x1000)
     t.write_register("ESP", 0x81000)
 
@@ -40,8 +40,7 @@ if __name__ == "__main__":
     try:
         while True:
             pc = t.read_register("EIP", t.REG_HINT_PROGRAM_COUNTER)
-            pc_int = o.convert_to_integer(pc)
-            print("Emulating instruction at {:08x}".format(pc_int))
+            print("Emulating instruction at {:08x}".format(pc))
             p.execute(t, 1)
     except Exception as e:
         print(e)

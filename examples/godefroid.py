@@ -539,7 +539,7 @@ if __name__ == "__main__":
     m.add_map(code)
     m.add_map(stack)
 
-    t = microx.Thread(o)
+    t = microx.EmptyThread(o)
 
     RETURN_ADDRESS_MAGIC = 0xFEEDF00D
     pc = 0x1000
