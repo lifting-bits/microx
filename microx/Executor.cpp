@@ -19,21 +19,26 @@
 #include <bitset>
 #include <cstring>
 
-#include <sys/mman.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <sys/mman.h>
 #include <ucontext.h>
 
 #include "microx/Executor.h"
 #include "microx/XED.h"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-register"
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+#include <bytesobject.h>
+#pragma clang diagnostic pop
+
 namespace microx {
 namespace {
 
-enum : size_t {
-  kPageSize = 4096
-};
+enum : size_t { kPageSize = 4096 };
 
 // A memory value that is read by the executor.
 struct Memory final {
@@ -58,34 +63,34 @@ struct Memory final {
 union alignas(8) Flags final {
   uint64_t flat;
   struct {
-    uint32_t cf:1;  // bit 0.
-    uint32_t must_be_1:1;
-    uint32_t pf:1;
-    uint32_t must_be_0a:1;
+    uint32_t cf : 1;  // bit 0.
+    uint32_t must_be_1 : 1;
+    uint32_t pf : 1;
+    uint32_t must_be_0a : 1;
 
-    uint32_t af:1;  // bit 4.
-    uint32_t must_be_0b:1;
-    uint32_t zf:1;
-    uint32_t sf:1;
+    uint32_t af : 1;  // bit 4.
+    uint32_t must_be_0b : 1;
+    uint32_t zf : 1;
+    uint32_t sf : 1;
 
-    uint32_t tf:1;  // bit 8.
-    uint32_t _if:1;  // underscore to avoid token clash.
-    uint32_t df:1;
-    uint32_t of:1;
+    uint32_t tf : 1;   // bit 8.
+    uint32_t _if : 1;  // underscore to avoid token clash.
+    uint32_t df : 1;
+    uint32_t of : 1;
 
-    uint32_t iopl:2;  // A 2-bit field, bits 12-13.
-    uint32_t nt:1;
-    uint32_t must_be_0c:1;
+    uint32_t iopl : 2;  // A 2-bit field, bits 12-13.
+    uint32_t nt : 1;
+    uint32_t must_be_0c : 1;
 
-    uint32_t rf:1;  // bit 16.
-    uint32_t vm:1;
-    uint32_t ac:1;  // Alignment check.
-    uint32_t vif:1;
+    uint32_t rf : 1;  // bit 16.
+    uint32_t vm : 1;
+    uint32_t ac : 1;  // Alignment check.
+    uint32_t vif : 1;
 
-    uint32_t vip:1;  // bit 20.
-    uint32_t id:1;   // bit 21.
-    uint32_t reserved_eflags:10;  // bits 22-31.
-    uint32_t reserved_rflags;  // bits 32-63.
+    uint32_t vip : 1;               // bit 20.
+    uint32_t id : 1;                // bit 21.
+    uint32_t reserved_eflags : 10;  // bits 22-31.
+    uint32_t reserved_rflags;       // bits 32-63.
   } __attribute__((packed));
 } __attribute__((packed));
 
@@ -94,30 +99,24 @@ static_assert(8 == sizeof(Flags), "Invalid structure packing of `Flags`.");
 // Scoped access to a mutex.
 class LockGuard {
  public:
-  LockGuard(pthread_mutex_t &lock_)
-      : lock(&lock_) {
-    pthread_mutex_lock(lock);
-  }
-  ~LockGuard(void) {
-    pthread_mutex_unlock(lock);
-  }
+  LockGuard(pthread_mutex_t &lock_) : lock(&lock_) { pthread_mutex_lock(lock); }
+  ~LockGuard(void) { pthread_mutex_unlock(lock); }
+
  private:
   pthread_mutex_t *lock;
 };
 
 // 32-bit decoded state.
-static const xed_state_t kXEDState32 = {
-    XED_MACHINE_MODE_LONG_COMPAT_32,
-    XED_ADDRESS_WIDTH_32b};
+static const xed_state_t kXEDState32 = {XED_MACHINE_MODE_LONG_COMPAT_32,
+                                        XED_ADDRESS_WIDTH_32b};
 
 // 64-bit decoded state.
-static const xed_state_t kXEDState64 = {
-    XED_MACHINE_MODE_LONG_64,
-    XED_ADDRESS_WIDTH_64b};
+static const xed_state_t kXEDState64 = {XED_MACHINE_MODE_LONG_64,
+                                        XED_ADDRESS_WIDTH_64b};
 
 // Decoded instructions.
 static xed_decoded_inst_t gXedd_;
-static xed_decoded_inst_t * const gXedd = &gXedd_;
+static xed_decoded_inst_t *const gXedd = &gXedd_;
 
 // High-level encoder info for the decoded instruction to be re-emitted.
 static xed_encoder_instruction_t gEmu;
@@ -186,23 +185,22 @@ static bool DecodeInstruction(const uint8_t *bytes, size_t num_bytes,
 // and presence of AVX(512).
 static xed_reg_enum_t WidestRegister(const Executor *executor,
                                      xed_reg_enum_t reg) {
-  reg = (64 == executor->addr_size) ?
-        xed_get_largest_enclosing_register(reg) :
-        xed_get_largest_enclosing_register32(reg);
+  reg = (64 == executor->addr_size) ? xed_get_largest_enclosing_register(reg)
+                                    : xed_get_largest_enclosing_register32(reg);
 
   // If not using AVX512, then downgrade a ZMM register to a YMM register.
   if (XED_REG_ZMM_FIRST <= reg && reg <= XED_REG_ZMM_LAST) {
     if (!executor->has_avx512) {
-      reg = static_cast<xed_reg_enum_t>(
-          (reg - XED_REG_ZMM_FIRST) + XED_REG_YMM_FIRST);
+      reg = static_cast<xed_reg_enum_t>((reg - XED_REG_ZMM_FIRST) +
+                                        XED_REG_YMM_FIRST);
     }
   }
 
   // If not using AVX, then downgrade a YMM register to an XMM register.
   if (XED_REG_YMM_FIRST <= reg && reg <= XED_REG_YMM_LAST) {
     if (!executor->has_avx) {
-      reg = static_cast<xed_reg_enum_t>(
-          (reg - XED_REG_YMM_FIRST) + XED_REG_XMM_FIRST);
+      reg = static_cast<xed_reg_enum_t>((reg - XED_REG_YMM_FIRST) +
+                                        XED_REG_XMM_FIRST);
     }
   }
 
@@ -220,12 +218,11 @@ static bool ReadRegister(const Executor *executor, xed_reg_enum_t reg,
   }
 
   const auto reg_class = xed_reg_class(reg);
-  if (XED_REG_CLASS_X87 == reg_class ||
-      XED_REG_CLASS_PSEUDOX87 == reg_class) {
+  if (XED_REG_CLASS_X87 == reg_class || XED_REG_CLASS_PSEUDOX87 == reg_class) {
     gUsesFPU = true;
     return true;
 
-  // Mark the FPU as being used; we'll merge/split the MMX state manually.
+    // Mark the FPU as being used; we'll merge/split the MMX state manually.
   } else if (XED_REG_CLASS_MMX == reg_class) {
     gUsesFPU = true;
     gUsesMMX = true;
@@ -275,10 +272,10 @@ static bool ReadRegistersMemOp(const Executor *executor, unsigned op_num) {
 static bool ReadRegisters(const Executor *executor) {
   auto num_operands = xed_decoded_inst_noperands(gXedd);
   auto xedi = xed_decoded_inst_inst(gXedd);
+
+  // Start by going and getting registers involved in memory access.
   for (auto i = 0U, mem_index = 0U; i < num_operands; ++i) {
     auto xedo = xed_inst_operand(xedi, i);
-    auto hint = !xed_operand_written(xedo) ? RegRequestHint::kGeneral :
-                                             RegRequestHint::kWriteBack;
     switch (auto op_name = xed_operand_name(xedo)) {
       case XED_OPERAND_AGEN:
       case XED_OPERAND_MEM0:
@@ -287,7 +284,18 @@ static bool ReadRegisters(const Executor *executor) {
           return false;
         }
         break;
+      default:
+        break;
+    }
+  }
 
+  // Then get the registers associated with reads.
+  for (auto i = 0U; i < num_operands; ++i) {
+    auto xedo = xed_inst_operand(xedi, i);
+    if (xed_operand_written(xedo)) {
+      continue;
+    }
+    switch (auto op_name = xed_operand_name(xedo)) {
       case XED_OPERAND_REG:
       case XED_OPERAND_REG0:
       case XED_OPERAND_REG1:
@@ -299,7 +307,35 @@ static bool ReadRegisters(const Executor *executor) {
       case XED_OPERAND_REG7:
       case XED_OPERAND_REG8:
         if (auto reg = xed_decoded_inst_get_reg(gXedd, op_name)) {
-          if (!ReadRegister(executor, reg, hint)) {
+          if (!ReadRegister(executor, reg, RegRequestHint::kGeneral)) {
+            return false;
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Finally get the written registers.
+  for (auto i = 0U; i < num_operands; ++i) {
+    auto xedo = xed_inst_operand(xedi, i);
+    if (!xed_operand_written(xedo)) {
+      continue;
+    }
+    switch (auto op_name = xed_operand_name(xedo)) {
+      case XED_OPERAND_REG:
+      case XED_OPERAND_REG0:
+      case XED_OPERAND_REG1:
+      case XED_OPERAND_REG2:
+      case XED_OPERAND_REG3:
+      case XED_OPERAND_REG4:
+      case XED_OPERAND_REG5:
+      case XED_OPERAND_REG6:
+      case XED_OPERAND_REG7:
+      case XED_OPERAND_REG8:
+        if (auto reg = xed_decoded_inst_get_reg(gXedd, op_name)) {
+          if (!ReadRegister(executor, reg, RegRequestHint::kWriteBack)) {
             return false;
           }
         }
@@ -329,11 +365,16 @@ uintptr_t ReadGPR(xed_reg_enum_t reg) {
     size = 16;
   }
   switch (size) {
-    case 64: return ReadValue<uint64_t>(reg) >> shift;
-    case 32: return ReadValue<uint32_t>(reg) >> shift;
-    case 16: return ReadValue<uint16_t>(reg) >> shift;
-    case 8: return ReadValue<uint8_t>(reg) >> shift;
-    default: return 0;
+    case 64:
+      return ReadValue<uint64_t>(reg) >> shift;
+    case 32:
+      return ReadValue<uint32_t>(reg) >> shift;
+    case 16:
+      return ReadValue<uint16_t>(reg) >> shift;
+    case 8:
+      return ReadValue<uint8_t>(reg) >> shift;
+    default:
+      return 0;
   }
 }
 
@@ -367,10 +408,10 @@ void WriteGPR(xed_reg_enum_t reg, uintptr_t val) {
         WriteValue<uint8_t>(reg, val);
       }
       break;
-    default: return;
+    default:
+      return;
   }
 }
-
 
 // Write the registers back to the executor. We only write back ones that
 // may have been modified (W, *RW, *CW).
@@ -379,9 +420,15 @@ static bool WriteRegisters(const Executor *executor) {
     WriteGPR(XED_REG_RSP, ReadGPR(gStackPtrAlias));
     gStackPtrAlias = XED_REG_INVALID;
   }
+
+  xed_reg_enum_t pc_reg = XED_REG_INVALID;
   for (auto i = 0UL; i < gUsedRegs.size(); ++i) {
+    const auto reg = static_cast<xed_reg_enum_t>(i);
+    if (i == XED_REG_EIP || i == XED_REG_RIP) {
+      pc_reg = reg;
+      continue;
+    }
     if (gModifiedRegs.test(i)) {
-      const auto reg = static_cast<xed_reg_enum_t>(i);
       const auto name = xed_reg_enum_t2str(reg);
       const auto size = xed_get_register_width_bits64(reg);
       const auto store_reg = xed_get_largest_enclosing_register(reg);
@@ -390,6 +437,17 @@ static bool WriteRegisters(const Executor *executor) {
       }
     }
   }
+
+  // Make sure the last written register is the program counter.
+  if (XED_REG_INVALID != pc_reg) {
+    const auto name = xed_reg_enum_t2str(pc_reg);
+    const auto size = xed_get_register_width_bits64(pc_reg);
+    const auto store_reg = xed_get_largest_enclosing_register(pc_reg);
+    if (!executor->WriteReg(name, size, gRegs[store_reg])) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -409,8 +467,7 @@ static uintptr_t GetBitOpByteOffset(void) {
     case XED_IFORM_BTR_LOCK_MEMv_IMMb: {
       auto bit_offset = xed_decoded_inst_get_unsigned_immediate(gXedd);
       xed_decoded_inst_set_immediate_unsigned(
-          gXedd,
-          bit_offset % bit_width,
+          gXedd, bit_offset % bit_width,
           xed_decoded_inst_get_immediate_width(gXedd));
       return 8 * (bit_offset / bit_width);
     }
@@ -437,8 +494,8 @@ static uintptr_t GetBitOpByteOffset(void) {
 
 // Compute a memory address and then ask the executor to read the memory at
 // that address.
-static bool ReadMemory(const Executor *executor,
-                       unsigned op_num, unsigned mem_index) {
+static bool ReadMemory(const Executor *executor, unsigned op_num,
+                       unsigned mem_index) {
   const auto iform = xed_decoded_inst_get_iform_enum(gXedd);
   const auto xedi = xed_decoded_inst_inst(gXedd);
   const auto xedo = xed_inst_operand(xedi, op_num);
@@ -476,7 +533,6 @@ static bool ReadMemory(const Executor *executor,
   const auto op_size_bytes = gEmu.effective_operand_width / 8;
   if (0 == mem_index) {
     switch (iform) {
-
       // For these, the memop is `[RSP]`, not `[RSP-N]` (which is what is
       // actually modified), so adjust accordingly.
       case XED_IFORM_CALL_NEAR_RELBRz:
@@ -559,9 +615,9 @@ static bool ReadMemory(const Executor *executor,
     hint = MemRequestHint::kAddressGeneration;
   }
 
-  mem.address = executor->ComputeAddress(
-      xed_reg_enum_t2str(mem.segment_reg), mem.base, mem.index, mem.scale,
-      mem.displacement, mem.size, hint);
+  mem.address = executor->ComputeAddress(xed_reg_enum_t2str(mem.segment_reg),
+                                         mem.base, mem.index, mem.scale,
+                                         mem.displacement, mem.size, hint);
 
   // Mask the address down to its proper width. The individual values might
   // all have the correct width; however, when added together, some 32-bit
@@ -663,14 +719,19 @@ static uintptr_t GetNextPC(const Executor *executor) {
 }
 
 // Get the first immediate operand as if it's a signed value.
-static uint64_t GetSignedImmediate(void){
+static uint64_t GetSignedImmediate(void) {
   int64_t simm0 = xed_decoded_inst_get_signed_immediate(gXedd);
   switch (gEmu.effective_operand_width) {
-    case 64: return static_cast<uint64_t>(simm0);
-    case 32: return static_cast<uint32_t>(simm0);
-    case 16: return static_cast<uint16_t>(simm0);
-    case 8: return static_cast<uint8_t>(simm0);
-    default: return 0;
+    case 64:
+      return static_cast<uint64_t>(simm0);
+    case 32:
+      return static_cast<uint32_t>(simm0);
+    case 16:
+      return static_cast<uint16_t>(simm0);
+    case 8:
+      return static_cast<uint8_t>(simm0);
+    default:
+      return 0;
   }
 }
 
@@ -707,85 +768,92 @@ static void UpdateFlagsSub(Flags &flags, uintptr_t lhs, uintptr_t rhs,
   flags.pf = ParityFlag(static_cast<uint8_t>(res));
 }
 
-#define STOS \
-    do { \
-      mem0 = ReadGPR(reg0); \
-      WriteGPR(dest_reg, static_cast<uint64_t>( \
-          static_cast<int64_t>(ReadGPR(dest_reg)) + stringop_inc)); \
-    } while (false)
+#define STOS                                                                 \
+  do {                                                                       \
+    mem0 = ReadGPR(reg0);                                                    \
+    WriteGPR(dest_reg,                                                       \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
+                                   stringop_inc));                           \
+  } while (false)
 
-#define SCAS \
-    do { \
-      const auto reg0_val = ReadGPR(reg0); \
-      const auto temp = reg0_val - mem0; \
-      const auto op_size = gEmu.effective_operand_width; \
-      UpdateFlagsSub(aflag, reg0_val, mem0, temp, op_size); \
-      WriteGPR(dest_reg, static_cast<uint64_t>( \
-          static_cast<int64_t>(ReadGPR(dest_reg)) + stringop_inc)); \
-    } while (false)
+#define SCAS                                                                 \
+  do {                                                                       \
+    const auto reg0_val = ReadGPR(reg0);                                     \
+    const auto temp = reg0_val - mem0;                                       \
+    const auto op_size = gEmu.effective_operand_width;                       \
+    UpdateFlagsSub(aflag, reg0_val, mem0, temp, op_size);                    \
+    WriteGPR(dest_reg,                                                       \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
+                                   stringop_inc));                           \
+  } while (false)
 
-#define LODS \
-    do { \
-      WriteGPR(reg0, mem0); \
-      WriteGPR(dest_reg, static_cast<uint64_t>( \
-          static_cast<int64_t>(ReadGPR(dest_reg)) + stringop_inc)); \
-    } while (false)
+#define LODS                                                                 \
+  do {                                                                       \
+    WriteGPR(reg0, mem0);                                                    \
+    WriteGPR(dest_reg,                                                       \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
+                                   stringop_inc));                           \
+  } while (false)
 
-#define MOVS \
-    do { \
-      mem0 = mem1; \
-      WriteGPR(src_reg, static_cast<uint64_t>( \
-          static_cast<int64_t>(ReadGPR(src_reg)) + stringop_inc)); \
-      WriteGPR(dest_reg, static_cast<uint64_t>( \
-          static_cast<int64_t>(ReadGPR(dest_reg)) + stringop_inc)); \
-    } while (false)
+#define MOVS                                                                 \
+  do {                                                                       \
+    mem0 = mem1;                                                             \
+    WriteGPR(src_reg,                                                        \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(src_reg)) +  \
+                                   stringop_inc));                           \
+    WriteGPR(dest_reg,                                                       \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
+                                   stringop_inc));                           \
+  } while (false)
 
-#define CMPS \
-    do { \
-      const auto temp = mem0 - mem1; \
-      const auto op_size = gEmu.effective_operand_width; \
-      UpdateFlagsSub(aflag, mem0, mem1, temp, op_size); \
-      WriteGPR(src_reg, static_cast<uint64_t>( \
-          static_cast<int64_t>(ReadGPR(src_reg)) + stringop_inc)); \
-      WriteGPR(dest_reg, static_cast<uint64_t>( \
-          static_cast<int64_t>(ReadGPR(dest_reg)) + stringop_inc)); \
-    } while (false)
+#define CMPS                                                                 \
+  do {                                                                       \
+    const auto temp = mem0 - mem1;                                           \
+    const auto op_size = gEmu.effective_operand_width;                       \
+    UpdateFlagsSub(aflag, mem0, mem1, temp, op_size);                        \
+    WriteGPR(src_reg,                                                        \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(src_reg)) +  \
+                                   stringop_inc));                           \
+    WriteGPR(dest_reg,                                                       \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
+                                   stringop_inc));                           \
+  } while (false)
 
-#define REPNE(...) \
-    do { \
-      if (count) { \
-        __VA_ARGS__; \
-        count = count - 1; \
-        WriteGPR(count_reg, count); \
-        if (count && !aflag.zf) { \
-          next_pc = curr_pc; \
-        } \
-      } \
-    } while (false)
+#define REPNE(...)                \
+  do {                            \
+    if (count) {                  \
+      __VA_ARGS__;                \
+      count = count - 1;          \
+      WriteGPR(count_reg, count); \
+      if (count && !aflag.zf) {   \
+        next_pc = curr_pc;        \
+      }                           \
+    }                             \
+  } while (false)
 
-#define REPE(...) \
-    do { \
-      if (count) { \
-        __VA_ARGS__; \
-        count = count - 1; \
-        WriteGPR(count_reg, count); \
-        if (count && aflag.zf) { \
-          next_pc = curr_pc; \
-        } \
-      } \
-    } while (false)
+#define REPE(...)                 \
+  do {                            \
+    if (count) {                  \
+      __VA_ARGS__;                \
+      count = count - 1;          \
+      WriteGPR(count_reg, count); \
+      if (count && aflag.zf) {    \
+        next_pc = curr_pc;        \
+      }                           \
+    }                             \
+  } while (false)
 
-#define REP(...) \
-    do { \
-      if (count) { \
-        __VA_ARGS__; \
-        count = count - 1; \
-        WriteGPR(count_reg, count); \
-        if (count) { \
-          next_pc = curr_pc; \
-        } \
-      } \
-    } while (false)
+#define REP(...)                  \
+  do {                            \
+    if (count) {                  \
+      __VA_ARGS__;                \
+      count = count - 1;          \
+      WriteGPR(count_reg, count); \
+      if (count) {                \
+        next_pc = curr_pc;        \
+      }                           \
+    }                             \
+  } while (false)
 
 // Figure out what the next program counter should be.
 static bool Emulate(const Executor *executor, uintptr_t &next_pc,
@@ -823,7 +891,6 @@ static bool Emulate(const Executor *executor, uintptr_t &next_pc,
   }
 
   switch (xed_decoded_inst_get_iform_enum(gXedd)) {
-
     case XED_IFORM_LEA_GPRv_AGEN:
       WriteGPR(reg0, gMemory[0].address);
       return true;
@@ -1052,7 +1119,7 @@ static bool Emulate(const Executor *executor, uintptr_t &next_pc,
     case XED_IFORM_RET_NEAR_IMMw:
       next_pc = mem0;
       WriteGPR(stack_reg, ReadGPR(stack_reg) + addr_size_bytes +
-                          static_cast<uint16_t>(simm0));
+                              static_cast<uint16_t>(simm0));
       return true;
 
     // Far CALL/RET/JMP are not supported.
@@ -1271,7 +1338,8 @@ static bool UsesUnsupportedAttributes(void) {
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_EXCEPTION_BR) ||
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_X87_MMX_STATE_R) ||
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_X87_MMX_STATE_W) ||
-         xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_X87_MMX_STATE_CW)||
+         xed_decoded_inst_get_attribute(gXedd,
+                                        XED_ATTRIBUTE_X87_MMX_STATE_CW) ||
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_XMM_STATE_R) ||
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_XMM_STATE_W) ||
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_XMM_STATE_CW) ||
@@ -1280,7 +1348,8 @@ static bool UsesUnsupportedAttributes(void) {
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_MASKOP) ||
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_MASKOP_EVEX) ||
          xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_MASK_AS_CONTROL) ||
-         xed_decoded_inst_get_attribute(gXedd, XED_ATTRIBUTE_MASK_VARIABLE_MEMOP);
+         xed_decoded_inst_get_attribute(gXedd,
+                                        XED_ATTRIBUTE_MASK_VARIABLE_MEMOP);
 }
 
 static bool UsesUnsupportedFeatures(const Executor *executor) {
@@ -1316,15 +1385,15 @@ static bool UsesUnsupportedFeatures(const Executor *executor) {
   }
 }
 
-#define READ_FLAG(field, name) \
-    if (read_flags.field) { \
-      if (!executor->ReadReg(name, 1, RegRequestHint::kConditionCode, \
-                             flag_val)) { \
-        return false; \
-      } \
-      aflag.field = !!(flag_val.bytes[0] & 1U); \
-      flag_val.bytes[0] = 0; \
-    }
+#define READ_FLAG(field, name)                                      \
+  if (read_flags.field) {                                           \
+    if (!executor->ReadReg(name, 1, RegRequestHint::kConditionCode, \
+                           flag_val)) {                             \
+      return false;                                                 \
+    }                                                               \
+    aflag.field = !!(flag_val.bytes[0] & 1U);                       \
+    flag_val.bytes[0] = 0;                                          \
+  }
 
 // Read in the flags, as if the individual flags themselves were registers.
 static bool ReadFlags(const Executor *executor) {
@@ -1374,14 +1443,14 @@ static bool ReadFlags(const Executor *executor) {
 }
 
 #undef READ_FLAG
-#define WRITE_FLAG(field, name) \
-    if (gWriteBackFlags.field) { \
-      flag_val.bytes[0] = aflag.field; \
-      if (!executor->WriteReg(name, 1, flag_val)) { \
-        return false; \
-      } \
-      flag_val.bytes[0] = 0; \
-    }
+#define WRITE_FLAG(field, name)                   \
+  if (gWriteBackFlags.field) {                    \
+    flag_val.bytes[0] = aflag.field;              \
+    if (!executor->WriteReg(name, 1, flag_val)) { \
+      return false;                               \
+    }                                             \
+    flag_val.bytes[0] = 0;                        \
+  }
 
 // Write back the flags, as if the individual flags themselves were registers.
 static bool WriteFlags(const Executor *executor) {
@@ -1429,7 +1498,6 @@ static void DecodeMem0(unsigned i) {
 // Create and return an alias for the stack pointer register for use by the
 // instruction.
 static xed_reg_enum_t GetStackPointerAlias(xed_reg_enum_t reg) {
-
   // Need to create an alias: these four registers are the most generally
   // usable, and we expect at least one of them to be free.
   if (XED_REG_INVALID == gStackPtrAlias) {
@@ -1466,7 +1534,6 @@ static xed_reg_enum_t GetStackPointerAlias(xed_reg_enum_t reg) {
 
 // Decode the register into the high-level encoder interface.
 static void DecodeRegN(unsigned i, xed_reg_enum_t reg) {
-
   // If the stack pointer is used in the instruction, then reschedule it to
   // a free register that can take its place.
   if (XED_REG_RSP == xed_get_largest_enclosing_register(reg)) {
@@ -1485,8 +1552,8 @@ static void DecodeImm0(unsigned i, xed_operand_enum_t op_name) {
   if (XED_OPERAND_IMM0SIGNED == op_name ||
       xed_operand_values_get_immediate_is_signed(gXedd)) {
     op.type = XED_ENCODER_OPERAND_TYPE_SIMM0;
-    op.u.imm0 = static_cast<uintptr_t>(static_cast<intptr_t>(
-        xed_decoded_inst_get_signed_immediate(gXedd)));
+    op.u.imm0 = static_cast<uintptr_t>(
+        static_cast<intptr_t>(xed_decoded_inst_get_signed_immediate(gXedd)));
   } else {
     op.type = XED_ENCODER_OPERAND_TYPE_IMM0;
     op.u.imm0 = xed_decoded_inst_get_unsigned_immediate(gXedd);
@@ -1535,7 +1602,7 @@ static void CreateEncodableInstruction(const Executor *executor) {
 
       case XED_OPERAND_IMM1_BYTES:
       case XED_OPERAND_IMM1:
-         DecodeImm1(op_index);
+        DecodeImm1(op_index);
         break;
 
       default:
@@ -1579,34 +1646,34 @@ static bool EncodeInstruction(const Executor *executor) {
   }
 }
 
-#define COPY_FROM_MMX_32(i) \
-  do { \
-    if (gUsedRegs.test(XED_REG_MMX ## i)) { \
-      memcpy(&(gFPU.fxsave32.st[i].mmx), gRegs[XED_REG_MMX ## i].bytes, 8); \
-      gFPU.fxsave32.st[i].infinity = static_cast<uint16_t>(~0U); \
-    } \
+#define COPY_FROM_MMX_32(i)                                               \
+  do {                                                                    \
+    if (gUsedRegs.test(XED_REG_MMX##i)) {                                 \
+      memcpy(&(gFPU.fxsave32.st[i].mmx), gRegs[XED_REG_MMX##i].bytes, 8); \
+      gFPU.fxsave32.st[i].infinity = static_cast<uint16_t>(~0U);          \
+    }                                                                     \
   } while (0)
 
-#define COPY_FROM_MMX_64(i) \
-  do { \
-    if (gUsedRegs.test(XED_REG_MMX ## i)) { \
-      memcpy(&(gFPU.fxsave64.st[i].mmx), gRegs[XED_REG_MMX ## i].bytes, 8); \
-      gFPU.fxsave64.st[i].infinity = static_cast<uint16_t>(~0U); \
-    } \
+#define COPY_FROM_MMX_64(i)                                               \
+  do {                                                                    \
+    if (gUsedRegs.test(XED_REG_MMX##i)) {                                 \
+      memcpy(&(gFPU.fxsave64.st[i].mmx), gRegs[XED_REG_MMX##i].bytes, 8); \
+      gFPU.fxsave64.st[i].infinity = static_cast<uint16_t>(~0U);          \
+    }                                                                     \
   } while (0)
 
-#define COPY_TO_MMX_32(i) \
-  do { \
-    if (gUsedRegs.test(XED_REG_MMX ## i)) { \
-      memcpy(gRegs[XED_REG_MMX ## i].bytes, &(gFPU.fxsave32.st[i].mmx), 8); \
-    } \
+#define COPY_TO_MMX_32(i)                                                 \
+  do {                                                                    \
+    if (gUsedRegs.test(XED_REG_MMX##i)) {                                 \
+      memcpy(gRegs[XED_REG_MMX##i].bytes, &(gFPU.fxsave32.st[i].mmx), 8); \
+    }                                                                     \
   } while (0)
 
-#define COPY_TO_MMX_64(i) \
-  do { \
-    if (gUsedRegs.test(XED_REG_MMX ## i)) { \
-      memcpy(gRegs[XED_REG_MMX ## i].bytes, &(gFPU.fxsave64.st[i].mmx), 8); \
-    } \
+#define COPY_TO_MMX_64(i)                                                 \
+  do {                                                                    \
+    if (gUsedRegs.test(XED_REG_MMX##i)) {                                 \
+      memcpy(gRegs[XED_REG_MMX##i].bytes, &(gFPU.fxsave64.st[i].mmx), 8); \
+    }                                                                     \
   } while (0)
 
 static void CopyMMXStateToFPU(const Executor *executor) {
@@ -1660,14 +1727,12 @@ static void LoadFPU(const Executor *executor) {
     asm(".byte 0x48; fxsave %0;"
         "fxrstor %1;"
         :
-        : "m"(gNativeFPU),
-          "m"(gFPU));
+        : "m"(gNativeFPU), "m"(gFPU));
   } else {
     asm(".byte 0x48; fxsave %0;"
         ".byte 0x48; fxrstor %1;"
         :
-        : "m"(gNativeFPU),
-          "m"(gFPU));
+        : "m"(gNativeFPU), "m"(gFPU));
   }
 }
 
@@ -1679,21 +1744,18 @@ static void StoreFPU(const Executor *executor) {
     asm("fxsave %0;"
         ".byte 0x48; fxrstor %1;"
         :
-        : "m"(gFPU),
-          "m"(gNativeFPU));
+        : "m"(gFPU), "m"(gNativeFPU));
   } else {
     asm(".byte 0x48; fxsave %0;"
         ".byte 0x48; fxrstor %1;"
         :
-        : "m"(gFPU),
-          "m"(gNativeFPU));
+        : "m"(gFPU), "m"(gNativeFPU));
   }
 }
 
 // Save and restore the native state, and execute the JITed instruction by
 // calling into the `gExecArea`.
 static void ExecuteNative(void) {
-
   // Need locals because GCC doesn't like having things with function calls
   // in the `asm` constraint list.
   //
@@ -1773,29 +1835,14 @@ static void ExecuteNative(void) {
 
       "add $8, %%rsp;"
       :
-      : "m"(XMM0),
-        "m"(XMM1),
-        "m"(XMM2),
-        "m"(XMM3),
-        "m"(XMM4),
-        "m"(XMM5),
-        "m"(XMM6),
-        "m"(XMM7),
-        "m"(gRegs[XED_REG_RAX]),
-        "m"(gRegs[XED_REG_RBX]),
-        "m"(gRegs[XED_REG_RCX]),
-        "m"(gRegs[XED_REG_RDX]),
-        "m"(gRegs[XED_REG_RBP]),
-        "m"(gRegs[XED_REG_RSI]),
-        "m"(gRegs[XED_REG_RDI]),
-        "m"(gRegs[XED_REG_R8]),
-        "m"(gRegs[XED_REG_R9]),
-        "m"(gRegs[XED_REG_R10]),
-        "m"(gRegs[XED_REG_R11]),
-        "m"(gRegs[XED_REG_R12]),
-        "m"(gRegs[XED_REG_R13]),
-        "m"(gRegs[XED_REG_R14]),
-        "m"(gRegs[XED_REG_R15]),
+      : "m"(XMM0), "m"(XMM1), "m"(XMM2), "m"(XMM3), "m"(XMM4), "m"(XMM5),
+        "m"(XMM6), "m"(XMM7), "m"(gRegs[XED_REG_RAX]), "m"(gRegs[XED_REG_RBX]),
+        "m"(gRegs[XED_REG_RCX]), "m"(gRegs[XED_REG_RDX]),
+        "m"(gRegs[XED_REG_RBP]), "m"(gRegs[XED_REG_RSI]),
+        "m"(gRegs[XED_REG_RDI]), "m"(gRegs[XED_REG_R8]), "m"(gRegs[XED_REG_R9]),
+        "m"(gRegs[XED_REG_R10]), "m"(gRegs[XED_REG_R11]),
+        "m"(gRegs[XED_REG_R12]), "m"(gRegs[XED_REG_R13]),
+        "m"(gRegs[XED_REG_R14]), "m"(gRegs[XED_REG_R15]),
         "m"(gRegs[XED_REG_RFLAGS]),
         "g"(reinterpret_cast<uintptr_t>(gExecArea)));
 }
@@ -1809,8 +1856,7 @@ static void ExecuteNativeAVX512(void) {
 }
 
 // Recover from a signal that was raised by executing the JITed instruction.
-[[noreturn]]
-static void RecoverFromError(int sig) {
+[[noreturn]] static void RecoverFromError(int sig) {
   gSignal = sig;
   siglongjmp(gRecoveryTarget, true);
 }
@@ -1818,14 +1864,11 @@ static void RecoverFromError(int sig) {
 }  // namespace
 
 Executor::Executor(size_t addr_size_, bool has_avx_, bool has_avx512_)
-    : addr_size(addr_size_),
-      has_avx(has_avx_),
-      has_avx512(has_avx512_) {}
+    : addr_size(addr_size_), has_avx(has_avx_), has_avx512(has_avx512_) {}
 
 Executor::~Executor(void) {}
 
 bool Executor::Init(void) {
-
   LockGuard locker(gExecutorLock);
   if (gIsInitialized) {
     return true;
@@ -1843,12 +1886,8 @@ bool Executor::Init(void) {
   // Map some portion of the `gExecArea_` memory to be RWX. The idea is that
   // we want our executable area to be near our other data variables (e.g.
   // register storage) so that we can access them via RIP-relative addressing.
-  auto ret = mmap(gExecArea,
-                  kPageSize,
-                  PROT_READ | PROT_WRITE | PROT_EXEC,
-                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
-                  -1,
-                  0);
+  auto ret = mmap(gExecArea, kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
+                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
   if (MAP_FAILED == gExecArea || gExecArea != ret) {
     gExecArea = nullptr;
     return false;
@@ -1890,8 +1929,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
   }
 
   for (size_t num_executed = 0; num_executed < max_num_executions;
-      ++num_executed) {
-
+       ++num_executed) {
     gUsedRegs.reset();
     gModifiedRegs.reset();
     gStoreRegs.reset();
@@ -1903,13 +1941,25 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
       return ExecutorStatus::kErrorReadReg;
     }
 
-    const auto pc = ComputeAddress(
-        "CS", GetPC(this), 0, 0, 0, 15 * 8, MemRequestHint::kReadExecutable);
+    const auto pc = ComputeAddress("CS", GetPC(this), 0, 0, 0, 8,
+                                   MemRequestHint::kReadExecutable);
 
+    // the maximum possible instruction length given our memory model
     size_t inst_length = 15;
     for (; inst_length; --inst_length) {
-      if (ReadMem(pc, inst_length * 8, MemRequestHint::kReadExecutable, idata)) {
+      if (ReadMem(pc, inst_length * 8, MemRequestHint::kReadExecutable,
+                  idata)) {
+        // A read succeeded and we have computed the maximum fetch length
         break;
+      } else {
+        // Ignore any exceptions generated by ReadMem
+        // If they are not ignored here, they will stack for every iteration
+        // of this loop and Python will get angry at us
+        if (PyErr_Occurred()) {
+          // TODO(artem): Debug print any 'unexpected' exceptions to warn the
+          // user they are ignored
+          PyErr_Clear();
+        }
       }
     }
 
@@ -1941,7 +1991,6 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
 
     if (XED_CATEGORY_NOP != xed_decoded_inst_get_category(gXedd) &&
         XED_CATEGORY_WIDENOP != xed_decoded_inst_get_category(gXedd)) {
-
       // Read in the FPU. We actually ignore the the embedded XMM registers
       // entirely.
       if (gUsesFPU && !this->ReadFPU(gFPU)) {
@@ -2027,12 +2076,12 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
       }
     }
 
-    // Write back any registers that were read or written.
-    SetNextPC(this, next_pc);
-
     if (!WriteFlags(this)) {
       return ExecutorStatus::kErrorWriteFlags;
     }
+
+    // Write back any registers that were read or written.
+    SetNextPC(this, next_pc);
 
     if (!WriteRegisters(this)) {
       return ExecutorStatus::kErrorWriteReg;
