@@ -1,3 +1,4 @@
+; Build via nasm -f elf32 -o simple.elf simple.asm
 BITS 32
 SECTION .text
 
