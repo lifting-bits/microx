@@ -130,8 +130,8 @@ class GodefroidProcess(microx.Process):
                     sys.stdout.write(f"[+] Emulating instruction at: {pc:08x}\n")
                     self.execute(t, 1)
                     instruction_count += 1
-        except InstructionFetchError:
-            sys.stdout.write(f"[!] Could not fetch instruction at: {pc:08x}. Ending run.\n")
+        except InstructionFetchError as efe:
+            sys.stdout.write(f"[!] Could not fetch instruction at: {pc:08x}. Error msg: {repr(efe)}.\n")
         except Exception as e:
             print(e)
             print(traceback.format_exc())
@@ -145,6 +145,7 @@ class GodefroidProcess(microx.Process):
 
         m = microx.Memory(o, 32)
 
+        mem_map = None
         for section in sections:
             start = section['start']
             size = section['size']
@@ -152,19 +153,36 @@ class GodefroidProcess(microx.Process):
             name = section['name']
             content = section['content']
 
-            mem_map = PolicyMemoryMap(
-                o,
-                start,
-                start+size,
-                flags,
-                DefaultMemoryPolicy(),
-                mapname=name,
-            )
+            page_start = start & ~(0xFFF)
+            page_end = (start + size + 0xFFF) & ~0xFFF
+            if "[stack]" == name:
+                sys.stdout.write(f"[+] Creating stack page from 0x{page_start:x} to 0x{page_end:x}. Flags: {flags}\n")
+                mem_map = PolicyMemoryMap(o,
+                    page_start,
+                    page_end,
+                    flags,
+                    DefaultMemoryPolicy(),
+                    mapname=name)
+                m.add_map(mem_map)
+            else:
+                for page in range(page_start, page_end, 0x1000):
+                    if not m.can_read(page):
+                        sys.stdout.write(f"[+] Mapping section [{name}] from 0x{page:x} to 0x{page+0x1000:x}. Flags: {flags}\n")
+                        mem_map = PolicyMemoryMap(o,
+                            page,
+                            page+0x1000,
+                            flags,
+                            DefaultMemoryPolicy(),
+                            mapname=name)
+
+                        m.add_map(mem_map)
 
             if content:
-                mem_map.store_bytes(start, content)
-
-            m.add_map(mem_map)
+                assert mem_map is not None
+                sys.stdout.write(f"[+] Writing 0x{len(content):x} bytes at 0x{start:x}\n")
+                #mem_map.store_bytes(start, content)
+                for (i,b) in enumerate(content):
+                    m.store(start+i, [b])
 
         p = GodefroidProcess(o, m, initial_sp)
 
@@ -240,13 +258,16 @@ def load_sections_from_binary(
         new_section["name"] = section.name
         new_section["start"] = section.min_addr
         new_section["size"] = section.memsize
+        sys.stdout.write(f"[+] CLE is loading section {section.name} from 0x{section.min_addr:x} to 0x{section.min_addr + section.memsize:x}\n")
+
+        elfseg = cle_binary.find_segment_containing(section.min_addr)
 
         new_section["flags"] = MemoryFlags.no_flags
-        if section.is_readable:
+        if elfseg.is_readable:
             new_section["flags"] |= MemoryFlags.Read
-        if section.is_writable:
+        if elfseg.is_writable:
             new_section["flags"] |= MemoryFlags.Write
-        if section.is_executable:
+        if elfseg.is_executable:
             new_section["flags"] |= MemoryFlags.Execute
 
         if section.only_contains_uninitialized_data:
@@ -285,7 +306,7 @@ def run_on_binary(
         sys.stdout.write(f"[+] Loaded binary: {binary}\n")
 
     # loop over binary sections
-    main_binary = loaded.all_objects[0]
+    main_binary = loaded.main_object
     if not main_binary:
         sys.stdout.write(f"[!] Could not find sections in {binary}\n")
         return None
