@@ -50,7 +50,7 @@ class GodefroidProcess(microx.Process):
         stack = stacks[0]
         if sp_value is None:
             # generate an aligned stack of some kind
-            sp_value = ((stack.limit() - stack.base()) // 2) & (~0xFF)
+            sp_value = stack.base() + ((stack.limit() - stack.base()) // 2) & (~0xFF)
 
         self._initial_sp = sp_value
 
@@ -211,7 +211,8 @@ def make_stack_section(loaded):
     if loaded.min_addr - 0x40000 > STACK_SIZE:
         new_section["start"] = 0x40000
     elif 0xFFFFFFFF - (loaded.max_addr + 0x40000) > STACK_SIZE:
-        new_section["start"] = loaded.max_addr + 0x40000
+        # Align loaded.max_addr to page alignment (on x86)
+        new_section["start"] = ((loaded.max_addr + 0xFFF) & ~0xFFF) + 0x40000
     else:
         sys.stdout.write(f"[!] Could not find a {STACK_SIZE:x} hole for stack. Aborting.\n")
         return None
@@ -240,7 +241,7 @@ def load_sections_from_binary(
         new_section["start"] = section.min_addr
         new_section["size"] = section.memsize
 
-        new_section["flags"] = 0
+        new_section["flags"] = MemoryFlags.no_flags
         if section.is_readable:
             new_section["flags"] |= MemoryFlags.Read
         if section.is_writable:
@@ -275,18 +276,18 @@ def run_on_binary(
     loaded = None
     try:
         loaded = cle.Loader(binary)
-    except e:
+    except Exception as e:
         sys.stdout.write(f"[!] Could not load binary [{binary}]. Reason: {str(e)}\n")
 
     if loaded is None:
         return None
     else:
-        sys.stdout.write("[+] Loaded binary: f{binary}\n")
+        sys.stdout.write(f"[+] Loaded binary: {binary}\n")
 
     # loop over binary sections
     main_binary = loaded.all_objects[0]
     if not main_binary:
-        sys.stdout.write(f"[!] Could not find sections in f{binary}\n")
+        sys.stdout.write(f"[!] Could not find sections in {binary}\n")
         return None
 
     ep = entry
@@ -304,7 +305,7 @@ def run_on_binary(
             return None
         else:
             ep_addr = sym.rebased_addr
-            sys.stdout.write(f"[+] Found f{ep} at f{ep_addr:x}\n")
+            sys.stdout.write(f"[+] Found [{ep}] at 0x{ep_addr:x}\n")
             ep = ep_addr
     
     if ep < main_binary.min_addr or ep > main_binary.max_addr:
@@ -338,7 +339,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     group_a = parser.add_mutually_exclusive_group()
     group_a.add_argument("--default", action="store_true", help="Run the default example")
-    group_b = group_a.add_mutually_exclusive_group()
+    group_b = group_a.add_argument_group()
     group_b.add_argument("--binary", help="Which binary file to load")
     group_b.add_argument("--entry", help="Address (in hex, 0x prefixed) or symbol at which to start execution")
     group_c = group_a.add_mutually_exclusive_group()
@@ -350,6 +351,7 @@ if __name__ == "__main__":
     if args.default:
         sys.stdout.write("[+] Executing the default Godefroid paper example\n")
         instruction_count, p = default_example()
+        
     else:
         if not args.binary:
             sys.stdout.write("[!] Please specify a binary file to load\n")
@@ -363,27 +365,27 @@ if __name__ == "__main__":
             sys.stdout.write("[!] Please specify an entry point\n")
             sys.exit(-1)
     
-    binary = args.binary
-    entrypoint = args.entry
+        binary = args.binary
+        entrypoint = args.entry
 
-    icount_type = Icount.COUNTED
-    max_inst = 0
-
-    if args.infinite:
-        icount_type = Icount.INFINITE
-    elif args.maxinst < 0:
-        sys.stdout.write(f"[!] Max insruction count must be zero or more. Got {args.maxinst}\n")
-        sys.exit(1)
-    else:
         icount_type = Icount.COUNTED
-        max_inst = args.maxinst
+        max_inst = 0
 
-    instruction_count, p = run_on_binary(
-        binary = binary,
-        entry = entrypoint,
-        icount_type = icount_type,
-        maxinst = max_inst
-    )
+        if args.infinite:
+            icount_type = Icount.INFINITE
+        elif args.maxinst < 0:
+            sys.stdout.write(f"[!] Max insruction count must be zero or more. Got {args.maxinst}\n")
+            sys.exit(1)
+        else:
+            icount_type = Icount.COUNTED
+            max_inst = args.maxinst
+
+        instruction_count, p = run_on_binary(
+            binary = binary,
+            entry = entrypoint,
+            icount_type = icount_type,
+            maxinst = max_inst
+        )
 
     # Stats
     sys.stdout.write(f"[+] Executed {instruction_count} instructions\n")
