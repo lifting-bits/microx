@@ -96,9 +96,9 @@ class GodefroidProcess(microx.Process):
         assert isinstance(self._policy, InputMemoryPolicy)
         return self._policy.get_outputs()
 
-    def run(self, initial_pc, max_insts, magic_return=0xFEEDF00D):
+    def run(self, initial_pc, max_insts, run_length=Icount.COUNTED, magic_return=0xFEEDF00D):
 
-        assert max_insts > 0
+        assert run_length == Icount.INFINITE or max_insts > 0
         # write our "magic return address" to the stack
         if magic_return is not None:
             stacks = list(self._memory.find_maps_by_name("[stack]"))
@@ -120,7 +120,7 @@ class GodefroidProcess(microx.Process):
 
         instruction_count = 0
         try:
-            while instruction_count < max_insts:
+            while run_length == Icount.INFINITE or instruction_count < max_insts:
                 pc_bytes = t.read_register("EIP", t.REG_HINT_PROGRAM_COUNTER)
                 pc = self._ops.convert_to_integer(pc_bytes)
                 if magic_return is not None and magic_return == pc:
@@ -152,11 +152,12 @@ class GodefroidProcess(microx.Process):
             flags = section['flags']
             name = section['name']
             content = section['content']
+            #sys.stdout.write(f"[+] Processing section {name}\n")
 
             page_start = start & ~(0xFFF)
             page_end = (start + size + 0xFFF) & ~0xFFF
             if "[stack]" == name:
-                sys.stdout.write(f"[+] Creating stack page from 0x{page_start:x} to 0x{page_end:x}. Flags: {flags}\n")
+                sys.stdout.write(f"[+] Creating stack region from 0x{page_start:x} to 0x{page_end:x}. Flags: {flags}\n")
                 mem_map = PolicyMemoryMap(o,
                     page_start,
                     page_end,
@@ -167,7 +168,7 @@ class GodefroidProcess(microx.Process):
             else:
                 for page in range(page_start, page_end, 0x1000):
                     if not m.can_read(page):
-                        sys.stdout.write(f"[+] Mapping section [{name}] from 0x{page:x} to 0x{page+0x1000:x}. Flags: {flags}\n")
+                        sys.stdout.write(f"[+] Mapping page from 0x{page:x} to 0x{page+0x1000:x}. Flags: {flags}\n")
                         mem_map = PolicyMemoryMap(o,
                             page,
                             page+0x1000,
@@ -179,10 +180,8 @@ class GodefroidProcess(microx.Process):
 
             if content:
                 assert mem_map is not None
-                sys.stdout.write(f"[+] Writing 0x{len(content):x} bytes at 0x{start:x}\n")
-                #mem_map.store_bytes(start, content)
-                for (i,b) in enumerate(content):
-                    m.store(start+i, [b])
+                #sys.stdout.write(f"[+] Writing 0x{len(content):x} bytes at 0x{start:x}\n")
+                mem_map.store_bytes(start, content)
 
         p = GodefroidProcess(o, m, initial_sp)
 
@@ -258,9 +257,14 @@ def load_sections_from_binary(
         new_section["name"] = section.name
         new_section["start"] = section.min_addr
         new_section["size"] = section.memsize
-        sys.stdout.write(f"[+] CLE is loading section {section.name} from 0x{section.min_addr:x} to 0x{section.min_addr + section.memsize:x}\n")
+        #sys.stdout.write(f"[+] CLE is loading section {section.name} from 0x{section.min_addr:x} to 0x{section.min_addr + section.memsize:x}\n")
 
         elfseg = cle_binary.find_segment_containing(section.min_addr)
+
+        # no segment... use section permissions and hope for the best
+        if elfseg is None:
+            sys.stdout.write("[!] WARNING: no ELF segments found.. using section permissions and hoping for the best\n")
+            elfseg = section
 
         new_section["flags"] = MemoryFlags.no_flags
         if elfseg.is_readable:
@@ -350,9 +354,8 @@ def run_on_binary(
         sys.stdout.write(f"[+] Loaded stack at: {stack_s['start']:x}\n")
         sections.append(stack_s)
     
-    #TODO(artem): Support infinite mode
     p = GodefroidProcess.create_from_sections(sections, initial_sp=None)
-    icount = p.run(initial_pc=ep, max_insts=maxinst)
+    icount = p.run(initial_pc=ep, max_insts=maxinst, run_length=icount_type)
     return icount, p
 
 if __name__ == "__main__":
@@ -393,6 +396,7 @@ if __name__ == "__main__":
         max_inst = 0
 
         if args.infinite:
+            sys.stdout.write("[+] Running for an INFINITE amount of instructions (or until function return)\n")
             icount_type = Icount.INFINITE
         elif args.maxinst < 0:
             sys.stdout.write(f"[!] Max insruction count must be zero or more. Got {args.maxinst}\n")
@@ -400,14 +404,20 @@ if __name__ == "__main__":
         else:
             icount_type = Icount.COUNTED
             max_inst = args.maxinst
+            sys.stdout.write(f"[+] Running for {max_inst} instructions (or function return)\n")
 
-        instruction_count, p = run_on_binary(
+        result = run_on_binary(
             binary = binary,
             entry = entrypoint,
             icount_type = icount_type,
             maxinst = max_inst
         )
 
+        if result is None:
+            sys.stdout.write(f"[!] Could not run on {binary} @ {entrypoint}\n")
+            sys.exit(-1)
+
+        instruction_count, p = result
     # Stats
     sys.stdout.write(f"[+] Executed {instruction_count} instructions\n")
     # Dump known inputs
