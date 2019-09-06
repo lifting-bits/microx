@@ -12,21 +12,91 @@ import argparse
 import os
 from enum import Enum, auto
 import cle
+import copy
 
 class Icount(Enum):
     INFINITE = auto()
     COUNTED = auto()
 
 
+class GodefroidRunner(object):
+    def __init__(self,
+            memory,
+            initial_pc,
+            initial_sp,
+            max_insts,
+            run_length=Icount.COUNTED,
+            magic_return=0xFEEDF00D):
+
+        assert run_length == Icount.INFINITE or max_insts > 0
+
+        self._memory = memory
+        self.i_pc = initial_pc
+        self.i_sp = initial_sp
+        self.max_insts = max_insts
+        self.run_length = run_length
+        self.magic_return = magic_return
+    
+    def make_new_process(self, mem):
+        p = GodefroidProcess(mem._ops, mem, self.i_sp)
+        # write our "magic return address" to the stack
+        if self.magic_return is not None:
+            stacks = list(p._memory.find_maps_by_name("[stack]"))
+            assert len(stacks) == 1
+            stack = stacks[0]
+            # Write our magic return on the stack without triggering a policy
+            stack.store_bytes_raw(
+                p._initial_sp,
+                self.magic_return.to_bytes(p._memory.address_size_bits() // 8, byteorder="little"),
+            )
+            sys.stdout.write(f"[+] Using fake return address of {self.magic_return:08x}\n")
+
+        return p
+
+    def run(self, iterations=1):
+
+        return_dict = {}
+        for itercount in range(iterations):
+
+            sys.stdout.write(f"[+] Attempting iteration {itercount}/{iterations}\n")
+
+            #TODO(artem): This is really slow. Should be implemented as some kind of CoW semantics
+            # or at least provide a way to 'reset' to a clean state
+            proc = self.make_new_process(copy.deepcopy(self._memory))
+
+            t = microx.EmptyThread(proc)
+            t.write_register("EIP", self.i_pc)
+            t.write_register("ESP", proc._initial_sp)
+
+            sys.stdout.write(f"[+] Initial EIP is: {self.i_pc:08x}\n")
+            sys.stdout.write(f"[+] Initial ESP is: {proc._initial_sp:08x}\n")
+
+            instruction_count = 0
+            try:
+                while self.run_length == Icount.INFINITE or instruction_count < self.max_insts:
+                    pc_bytes = t.read_register("EIP", t.REG_HINT_PROGRAM_COUNTER)
+                    pc = proc._ops.convert_to_integer(pc_bytes)
+                    if self.magic_return is not None and self.magic_return == pc:
+                        sys.stdout.write("[+] Reached return address. Stopping\n")
+                        break
+                    else:
+                        sys.stdout.write(f"[+] Emulating instruction at: {pc:08x}\n")
+                        proc.execute(t, 1)
+                        instruction_count += 1
+            except InstructionFetchError as efe:
+                sys.stdout.write(f"[!] Could not fetch instruction at: {pc:08x}. Error msg: {repr(efe)}.\n")
+            except Exception as e:
+                print(e)
+                print(traceback.format_exc())
+                pass
+
+            return_dict[itercount] = (instruction_count, proc)
+        return return_dict
+
 class GodefroidProcess(microx.Process):
     INPUT_SPACE_SIZE = 0x1080000
     def __init__(self, ops, memory, sp_value=None):
         super(GodefroidProcess, self).__init__(ops, memory)
-
-        # TODO(artem): Iterarate over maps in `memory`, and pick a hole for use as 'input' addresses
-        # This is an address range for addresses that we identify as "input"
-        # For example, this is the range into which a hypothetical pointer passed in an argument
-        # would point
 
         #NOTE(artem): Allows for user-specified input heaps
         if not memory.find_maps_by_name("[input_space]"):
@@ -96,51 +166,8 @@ class GodefroidProcess(microx.Process):
         assert isinstance(self._policy, InputMemoryPolicy)
         return self._policy.get_outputs()
 
-    def run(self, initial_pc, max_insts, run_length=Icount.COUNTED, magic_return=0xFEEDF00D):
-
-        assert run_length == Icount.INFINITE or max_insts > 0
-        # write our "magic return address" to the stack
-        if magic_return is not None:
-            stacks = list(self._memory.find_maps_by_name("[stack]"))
-            assert len(stacks) == 1
-            stack = stacks[0]
-            # Write our magic return on the stack without triggering a policy
-            stack.store_bytes_raw(
-                self._initial_sp,
-                magic_return.to_bytes(self._memory.address_size_bits() // 8, byteorder="little"),
-            )
-            sys.stdout.write(f"[+] Using fake return address of {magic_return:08x}\n")
-
-        sys.stdout.write(f"[+] Initial EIP is: {initial_pc:08x}\n")
-        sys.stdout.write(f"[+] Initial ESP is: {self._initial_sp:08x}\n")
-
-        t = microx.EmptyThread(self._ops)
-        t.write_register("EIP", initial_pc)
-        t.write_register("ESP", self._initial_sp)
-
-        instruction_count = 0
-        try:
-            while run_length == Icount.INFINITE or instruction_count < max_insts:
-                pc_bytes = t.read_register("EIP", t.REG_HINT_PROGRAM_COUNTER)
-                pc = self._ops.convert_to_integer(pc_bytes)
-                if magic_return is not None and magic_return == pc:
-                    sys.stdout.write("[+] Reached return address. Stopping\n")
-                    break
-                else:
-                    sys.stdout.write(f"[+] Emulating instruction at: {pc:08x}\n")
-                    self.execute(t, 1)
-                    instruction_count += 1
-        except InstructionFetchError as efe:
-            sys.stdout.write(f"[!] Could not fetch instruction at: {pc:08x}. Error msg: {repr(efe)}.\n")
-        except Exception as e:
-            print(e)
-            print(traceback.format_exc())
-            pass
-
-        return instruction_count
-    
     @classmethod
-    def create_from_sections(cls, sections, initial_sp=None):
+    def create_memory_from_sections(cls, sections):
         o = microx.Operations()
 
         m = microx.Memory(o, 32)
@@ -181,11 +208,9 @@ class GodefroidProcess(microx.Process):
             if content:
                 assert mem_map is not None
                 #sys.stdout.write(f"[+] Writing 0x{len(content):x} bytes at 0x{start:x}\n")
-                mem_map.store_bytes(start, content)
+                mem_map.store_bytes_raw(start, content)
 
-        p = GodefroidProcess(o, m, initial_sp)
-
-        return p
+        return m
 
 def default_example():
 
@@ -216,9 +241,10 @@ def default_example():
          }
     ]
 
-    p = GodefroidProcess.create_from_sections(sections, initial_sp=0x81000)
-    icount = p.run(initial_pc=0x1000, max_insts=15)
-    return icount, p
+    m = GodefroidProcess.create_memory_from_sections(sections)
+    r = GodefroidRunner(m, initial_pc=0x1000, initial_sp=0x81000, max_insts=15)
+    rv = r.run(iterations=1)
+    return rv[0]
 
 
 def make_stack_section(loaded):
@@ -354,9 +380,10 @@ def run_on_binary(
         sys.stdout.write(f"[+] Loaded stack at: {stack_s['start']:x}\n")
         sections.append(stack_s)
     
-    p = GodefroidProcess.create_from_sections(sections, initial_sp=None)
-    icount = p.run(initial_pc=ep, max_insts=maxinst, run_length=icount_type)
-    return icount, p
+    m = GodefroidProcess.create_memory_from_sections(sections)
+    r = GodefroidRunner(m, initial_pc=ep, initial_sp=None, max_insts=maxinst, run_length=icount_type)
+    rv = r.run(iterations=1)
+    return rv[0]
 
 if __name__ == "__main__":
     
@@ -399,7 +426,7 @@ if __name__ == "__main__":
             sys.stdout.write("[+] Running for an INFINITE amount of instructions (or until function return)\n")
             icount_type = Icount.INFINITE
         elif args.maxinst < 0:
-            sys.stdout.write(f"[!] Max insruction count must be zero or more. Got {args.maxinst}\n")
+            sys.stdout.write(f"[!] Max instruction count must be zero or more. Got {args.maxinst}\n")
             sys.exit(1)
         else:
             icount_type = Icount.COUNTED

@@ -34,6 +34,14 @@ class InputMemoryPolicy:
     # TODO(artem): Make this a configurable value or based on address size
     POINTER_INCREMENT = int(0x1000 / 4)
 
+    def __deepcopy__(self, memo):
+        # Just create a new one. We do not care about
+        # copying access ranges for what we're doing
+        cp = InputMemoryPolicy(self._address_size*8, 
+            (self._start, self._end),
+            (self._pointers_start, self._pointers_end))
+        return cp
+
     def __init__(self, address_size, argument_vas, pointer_vas):
 
         self._address_size = int(address_size / 8)
