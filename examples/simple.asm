@@ -1,16 +1,14 @@
-; Build via nasm -f elf32 -o simple.elf simple.asm
-BITS 32
-SECTION .text
-
-global main
+.text
+.globl main
+.intel_syntax noprefix
 
 main:
 push   ebp
 mov    ebp,esp
 push   ecx
-mov    eax, dword [ebp+0x8]
-mov    cl, byte [eax]
-mov    byte [ebp-0x1], cl
+mov    eax, dword ptr [ebp+0x8]
+mov    cl, byte ptr [eax]
+mov    byte ptr [ebp-0x1], cl
 mov    esp,ebp
 pop    ebp
 ret    0x0
