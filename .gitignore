@@ -4,3 +4,4 @@ __pycache__/
 microx/__pycache__/
 .vscode/ipch/*
 .vscode/settings.json
+examples/*.elf
