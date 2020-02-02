@@ -3,9 +3,9 @@
 
 import distutils.core
 import os
-import platform
+import sys
 
-if 2 >= int(platform.python_version().split(".")[0]):
+if sys.version_info < (3, 5):
   print("Microx is only supported on Python 3 and above.")
   exit(1)
 
