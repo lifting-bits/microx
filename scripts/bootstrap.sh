@@ -1,37 +1,17 @@
 #!/usr/bin/env bash
 # Copyright 2016 Peter Goodman (peter@trailofbits.com), all rights reserved.
+set -euo pipefail
 
-# Directory in which the script dir resides (i.e. McSema root dir).
-DIR=$(dirname $( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd ))
+# microx git repo root directory
+DIR="$( dirname "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )" )"
+XED_MFILE_FLAGS="${XED_MFILE_FLAGS-"--static"}"
+export CC="${CC:-$(command -v cc)}"
+export CXX="${CXX:-$(command -v c++)}"
 
-RED=`tput setaf 1`
-GREEN=`tput setaf 2`
-YELLOW=`tput setaf 3`
-BLUE=`tput setaf 4`
-RESET=`tput sgr0`
-XED_RELEASE=`date +%Y-%m-%d`
-LIB_EXT=a
-
-if [[ "$OSTYPE" == "linux-gnu" ]]; then
-    XED_VERSION=xed-install-base-${XED_RELEASE}-lin-x86-64
-
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    XED_VERSION=xed-install-base-${XED_RELEASE}-mac-x86-64
-else
-    printf "${RED}Unsupported platform: ${OSTYPE}${RESET}\n"
-    exit 1
-fi
-
-function fix_library()
+function download_and_install_xed()
 {
-    if [[ "$OSTYPE" == "darwin"* && "$LIB_EXT" == "dylib" ]]; then
-        install_name_tool -id $DIR/third_party/lib/lib$1.dylib $DIR/third_party/lib/lib$1.dylib
-    fi
-}
+    pushd "$DIR"/third_party/src
 
-function download_and_extract_xed()
-{
-    pushd $DIR/third_party/src
     if [[ ! -e xed ]] ; then
         git clone --depth 1 --single-branch --branch master git@github.com:intelxed/xed.git
     else
@@ -47,38 +27,34 @@ function download_and_extract_xed()
         git pull origin master
         popd
     fi;
-    
-    if [[ "x${CC}x" = "xx" ]] ; then
-        export CC=`which cc`
-    fi;
-    
-    if [[ "x${CXX}x" = "xx" ]] ; then
-        export CXX=`which c++`
-    fi;
-    
+
     pushd xed
-    python ./mfile.py install --extra-flags=-fPIC --static "--cc=${CC}" "--cxx=${CXX}"
-    mkdir -p $DIR/third_party/include/intel
-    
-    if [[ -e ./kits/${XED_VERSION}/lib/libxed.a ]] ; then
-        LIB_EXT=a
-    elif [[ -e ./kits/${XED_VERSION}/lib/libxed.so ]] ; then
-        LIB_EXT=so
-    elif [[ -e ./kits/${XED_VERSION}/lib/libxed.dylib ]] ; then
-        LIB_EXT=dylib
-    fi
 
-    cp -r ./kits/${XED_VERSION}/lib/libxed.$LIB_EXT $DIR/third_party/lib
-    cp -r ./kits/${XED_VERSION}/include/* $DIR/third_party/include/intel
+    #rm -rf ./obj
+    rm -rf ./microx-kit
 
-    fix_library xed
+    ./mfile.py install \
+        --install-dir ./microx-kit \
+        --extra-flags="-fPIC" \
+        --cc="$CC" \
+        --cxx="$CXX" \
+        $XED_MFILE_FLAGS
+
+    rm -rf "$DIR"/third_party/include/xed
+    cp -r ./microx-kit/include/xed "$DIR"/third_party/include/
+    rm -f "$DIR"/third_party/lib/libxed*
+    cp -r ./microx-kit/lib/* "$DIR"/third_party/lib/
 
     popd
-    popd 
+    popd
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        find "$DIR"/third_party/lib -name 'libxed*.dylib' -exec install_name_tool -id {} {} \;
+    fi
 }
 
-mkdir -p $DIR/third_party/src
-mkdir -p $DIR/third_party/lib
-mkdir -p $DIR/third_party/include
+mkdir -p "$DIR"/third_party/src
+mkdir -p "$DIR"/third_party/lib
+mkdir -p "$DIR"/third_party/include
 
-download_and_extract_xed
+download_and_install_xed
