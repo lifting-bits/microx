@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 # Copyright 2019 Trail of Bits, all rights reserved.
 
-import distutils.core
+import setuptools
 import os
 import sys
 
 if sys.version_info < (3, 5):
-  print("Microx is only supported on Python 3 and above.")
-  exit(1)
+    print("Microx is only supported on Python 3.5 and above.")
+    exit(1)
 
-MICROX_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+MICROX_DIR = os.path.dirname(os.path.realpath(__file__))
+os.chdir(MICROX_DIR)
 
-microx_core = distutils.core.Extension(
+microx_core = setuptools.Extension(
     "microx_core",
     include_dirs=[
         MICROX_DIR,
@@ -24,7 +25,7 @@ microx_core = distutils.core.Extension(
     library_dirs=[os.path.join(MICROX_DIR, "third_party", "lib")],
     runtime_library_dirs=[os.path.join(MICROX_DIR, "third_party", "lib")])
 
-distutils.core.setup(
+setuptools.setup(
     name="microx",
     version="1.0",
     description="x86 and x86_64 micro-executor.",
