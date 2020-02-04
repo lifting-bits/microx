@@ -1,7 +1,18 @@
-build/
-third_party/
+/build/
+/dist/
+/examples/*.elf
+/third_party/
+
+# The compiled extension is placed here when
+# microx is installed with `pip install -e .`
+/microx_core.*
+
 __pycache__/
-microx/__pycache__/
+*.py[cod]
+*.egg-info/
+
 .vscode/ipch/*
 .vscode/settings.json
-examples/*.elf
+
+# IntelliJ family of IDEs (PyCharm or any other IntelliJ IDE with python plugin)
+.idea/
