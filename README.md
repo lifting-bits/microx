@@ -12,3 +12,11 @@ The following lists some use-cases of microx:
 Microx uses a combination of JIT-based dynamic binary translation and instruction emulation in order to safely execute x86 instructions. It is a 64-bit library, but it can execute 32-bit instructions that are not supported on 64-bit platforms. It can be easily embedded, as it performs no dynamic memory allocations, and is re-entrant.
 
 Microx depends on [Intel's XED](https://intelxed.github.io/) instruction encoder and decoder.
+
+## Compilation on Windows (MinGW)
+
+To compile for Windows you can use MinGW, the following command should work (make sure to adjust for your Python version):
+
+```
+g++ -g -shared Executor.cpp Python.cpp -Lc:\Python37-64\libs -lpython37 -std=c++14 -I.. -I..\third_party\include -Ic:\Python37-64\include -Wno-attributes -lxed -L..\third_party\lib -o microx_core.pyd
+```
