@@ -37,7 +37,7 @@
 
 extern "C" {
 #define XED_DLL
-#include <intel/xed/xed-interface.h>
+#include <xed/xed-interface.h>
 }  // extern C
 
 #if defined(__clang__)
