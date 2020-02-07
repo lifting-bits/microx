@@ -19,11 +19,15 @@
 #include <bitset>
 #include <cstring>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include <ucontext.h>
+#endif //_WIN32
 
 #include "microx/Executor.h"
 #include "microx/XED.h"
@@ -97,14 +101,29 @@ union alignas(8) Flags final {
 static_assert(8 == sizeof(Flags), "Invalid structure packing of `Flags`.");
 
 // Scoped access to a mutex.
+#ifdef _WIN32
+class LockGuard {
+ public:
+  LockGuard(CRITICAL_SECTION &lock_) : lock(&lock_) { EnterCriticalSection(lock); }
+  ~LockGuard(void) { LeaveCriticalSection(lock); }
+  LockGuard(const LockGuard&) = delete;
+  LockGuard& operator=(const LockGuard&) = delete;
+
+ private:
+  CRITICAL_SECTION *lock;
+};
+#else
 class LockGuard {
  public:
   LockGuard(pthread_mutex_t &lock_) : lock(&lock_) { pthread_mutex_lock(lock); }
   ~LockGuard(void) { pthread_mutex_unlock(lock); }
+  LockGuard(const LockGuard&) = delete;
+  LockGuard& operator=(const LockGuard&) = delete;
 
  private:
   pthread_mutex_t *lock;
 };
+#endif //_WIN32
 
 // 32-bit decoded state.
 static const xed_state_t kXEDState32 = {XED_MACHINE_MODE_LONG_COMPAT_32,
@@ -137,6 +156,9 @@ static bool gUsesFPU = false;
 static bool gUsesMMX = false;
 FPU gFPU, gNativeFPU;
 
+#ifdef _WIN32
+static DWORD gExceptionCode = 0;
+#else
 static int gSignal = 0;
 static struct sigaction gSignalHandler;
 static struct sigaction gSIGILL;
@@ -144,6 +166,7 @@ static struct sigaction gSIGSEGV;
 static struct sigaction gSIGBUS;
 static struct sigaction gSIGFPE;
 static sigjmp_buf gRecoveryTarget;
+#endif //_WIN32
 
 // Flags that must be written back.
 static Flags gWriteBackFlags;
@@ -154,7 +177,12 @@ static Memory gMemory[2];
 // Guards accesses to globals. Using pthreads for portability, so that
 // libc++ / libstdc++ doesn't need to be linked in (otherwise `std::mutex`
 // would be nicer).
+#ifdef _WIN32
+static CRITICAL_SECTION gExecutorLock;
+static bool gExecutorLockInitialized = []{ InitializeCriticalSection(&gExecutorLock); return true; }();
+#else
 static pthread_mutex_t gExecutorLock = PTHREAD_MUTEX_INITIALIZER;
+#endif //_WIN32
 
 // Returns true if the executor is initialized.
 static bool gIsInitialized = false;
@@ -1848,18 +1876,50 @@ static void ExecuteNative(void) {
 }
 
 static void ExecuteNativeAVX(void) {
+#ifdef _WIN32
+  gExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;  // TODO(pag): Implement this!
+#else
   gSignal = SIGILL;  // TODO(pag): Implement this!
+#endif //_WIN32
 }
 
 static void ExecuteNativeAVX512(void) {
+#ifdef _WIN32
+  gExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;  // TODO(pag): Implement this!
+#else
   gSignal = SIGILL;  // TODO(pag): Implement this!
+#endif //_WIN32
 }
 
+#ifdef _WIN32
+LONG WINAPI VectoredHandler(struct _EXCEPTION_POINTERS *ExceptionInfo) {
+#ifdef _WIN64
+#define Cip ExceptionInfo->ContextRecord->Rip
+#define Csp ExceptionInfo->ContextRecord->Rsp
+#else
+#define Cip ExceptionInfo->ContextRecord->Eip
+#define Csp ExceptionInfo->ContextRecord->Esp
+#endif //_WIN64
+  auto execArea = (uintptr_t)gExecArea;
+  if (Cip >= execArea && Cip < execArea + kPageSize) {
+    gExceptionCode = ExceptionInfo->ExceptionRecord->ExceptionCode;
+    // Emulate the RET
+    Cip = *(uintptr_t*)Csp;
+    Csp += sizeof(uintptr_t);
+    return EXCEPTION_CONTINUE_EXECUTION;
+  } else {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+#undef Csp
+#undef Cip
+}
+#else
 // Recover from a signal that was raised by executing the JITed instruction.
 [[noreturn]] static void RecoverFromError(int sig) {
   gSignal = sig;
   siglongjmp(gRecoveryTarget, true);
 }
+#endif //_WIN32
 
 }  // namespace
 
@@ -1886,9 +1946,15 @@ bool Executor::Init(void) {
   // Map some portion of the `gExecArea_` memory to be RWX. The idea is that
   // we want our executable area to be near our other data variables (e.g.
   // register storage) so that we can access them via RIP-relative addressing.
+#ifdef _WIN32
+  DWORD dwOldProtect = 0;
+  auto ret = VirtualProtect(gExecArea, kPageSize, PAGE_EXECUTE_READWRITE, &dwOldProtect);
+  if (!ret) {
+#else
   auto ret = mmap(gExecArea, kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
   if (MAP_FAILED == gExecArea || gExecArea != ret) {
+#endif //_WIN32
     gExecArea = nullptr;
     return false;
   }
@@ -1897,9 +1963,12 @@ bool Executor::Init(void) {
 
   memset(&gRegs, 0, sizeof(gRegs));
 
+#ifdef _WIN32
+#else
   gSignalHandler.sa_handler = RecoverFromError;
   gSignalHandler.sa_flags = SA_ONSTACK;
   sigfillset(&(gSignalHandler.sa_mask));
+#endif //_WIN32
 
   gIsInitialized = true;
 
@@ -2020,6 +2089,22 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
         } else if (!EncodeInstruction(this)) {
           return ExecutorStatus::kErrorExecute;
         } else {
+#ifdef _WIN32
+          gExceptionCode = 0;
+          auto hExceptionHandler = AddVectoredExceptionHandler(1, VectoredHandler);
+
+          LoadFPU(this);
+          if (has_avx512) {
+            ExecuteNativeAVX512();
+          } else if (has_avx) {
+            ExecuteNativeAVX();
+          } else {
+            ExecuteNative();
+          }
+          StoreFPU(this);
+          
+          RemoveVectoredExceptionHandler(hExceptionHandler);
+#else
           gSignal = 0;
           sigaction(SIGILL, &gSignalHandler, &gSIGILL);
           sigaction(SIGBUS, &gSignalHandler, &gSIGBUS);
@@ -2042,7 +2127,30 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
           sigaction(SIGBUS, &gSIGBUS, nullptr);
           sigaction(SIGSEGV, &gSIGSEGV, nullptr);
           sigaction(SIGFPE, &gSIGFPE, nullptr);
+#endif //_WIN32
         }
+#ifdef _WIN32
+        switch (gExceptionCode) {
+          case 0:
+            break;  // All good :-D
+
+          case EXCEPTION_ACCESS_VIOLATION:
+            return ExecutorStatus::kErrorFault;
+
+          case EXCEPTION_FLT_DENORMAL_OPERAND:
+          case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+          case EXCEPTION_FLT_INEXACT_RESULT:
+          case EXCEPTION_FLT_INVALID_OPERATION:
+          case EXCEPTION_FLT_OVERFLOW:
+          case EXCEPTION_FLT_STACK_CHECK:
+          case EXCEPTION_FLT_UNDERFLOW:
+            return ExecutorStatus::kErrorFloatingPointException;
+
+          case EXCEPTION_ILLEGAL_INSTRUCTION:
+          default:
+            return ExecutorStatus::kErrorExecute;
+        }
+#else
         switch (gSignal) {
           case 0:
             break;  // All good :-D
@@ -2058,6 +2166,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
           default:
             return ExecutorStatus::kErrorExecute;
         }
+#endif //_WIN32
       }
 
       // Done before writing back the registers so that a failure of the
