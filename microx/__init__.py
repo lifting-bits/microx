@@ -495,6 +495,10 @@ class Process(Executor):
         self._thread = thread
         try:
             super(Process, self).execute(max_num_instructions)
+
+            # Approximate TSC as 1 cycle / instruction.
+            tsc = self.read_register("TSC", thread.REG_HINT_NONE)
+            self.write_register("TSC", tsc + max_num_instructions)
         finally:
             self._thread = None
 

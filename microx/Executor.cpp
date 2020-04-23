@@ -213,26 +213,30 @@ static bool DecodeInstruction(const uint8_t *bytes, size_t num_bytes,
 // and presence of AVX(512).
 static xed_reg_enum_t WidestRegister(const Executor *executor,
                                      xed_reg_enum_t reg) {
-  reg = (64 == executor->addr_size) ? xed_get_largest_enclosing_register(reg)
-                                    : xed_get_largest_enclosing_register32(reg);
+  xed_reg_enum_t wreg;
+  wreg = (64 == executor->addr_size) ? xed_get_largest_enclosing_register(reg)
+                                     : xed_get_largest_enclosing_register32(reg);
+  if (wreg == XED_REG_INVALID) {
+    return reg;
+  }
 
   // If not using AVX512, then downgrade a ZMM register to a YMM register.
-  if (XED_REG_ZMM_FIRST <= reg && reg <= XED_REG_ZMM_LAST) {
+  if (XED_REG_ZMM_FIRST <= wreg && wreg <= XED_REG_ZMM_LAST) {
     if (!executor->has_avx512) {
-      reg = static_cast<xed_reg_enum_t>((reg - XED_REG_ZMM_FIRST) +
-                                        XED_REG_YMM_FIRST);
+      wreg = static_cast<xed_reg_enum_t>((wreg - XED_REG_ZMM_FIRST) +
+                                         XED_REG_YMM_FIRST);
     }
   }
 
   // If not using AVX, then downgrade a YMM register to an XMM register.
-  if (XED_REG_YMM_FIRST <= reg && reg <= XED_REG_YMM_LAST) {
+  if (XED_REG_YMM_FIRST <= wreg && wreg <= XED_REG_YMM_LAST) {
     if (!executor->has_avx) {
-      reg = static_cast<xed_reg_enum_t>((reg - XED_REG_YMM_FIRST) +
-                                        XED_REG_XMM_FIRST);
+      wreg = static_cast<xed_reg_enum_t>((wreg - XED_REG_YMM_FIRST) +
+                                         XED_REG_XMM_FIRST);
     }
   }
 
-  return reg;
+  return wreg;
 }
 
 // Read in a register from the executor. The data of the register is stored
@@ -907,6 +911,7 @@ static bool Emulate(const Executor *executor, uintptr_t &next_pc,
   const auto stack_reg = WidestRegister(executor, XED_REG_ESP);
   const auto reg0 = xed_decoded_inst_get_reg(gXedd, XED_OPERAND_REG0);
   const auto reg1 = xed_decoded_inst_get_reg(gXedd, XED_OPERAND_REG1);
+  const auto reg2 = xed_decoded_inst_get_reg(gXedd, XED_OPERAND_REG2);
   auto &mem0 = *reinterpret_cast<uintptr_t *>(gMemory[0].data.bytes);
   auto &mem1 = *reinterpret_cast<uintptr_t *>(gMemory[1].data.bytes);
   const auto addr_size_bytes = executor->addr_size / 8;
@@ -1347,6 +1352,16 @@ static bool Emulate(const Executor *executor, uintptr_t &next_pc,
       WriteGPR(reg0, mem0);
       return true;
 
+    case XED_IFORM_RDTSCP:
+        WriteGPR(reg2, ReadValue<uint32_t>(XED_REG_TSCAUX));
+        // fall-through
+    case XED_IFORM_RDTSC: {
+        uint64_t tsc = ReadValue<uint64_t>(XED_REG_TSC);
+        WriteGPR(reg0, static_cast<uint32_t>(tsc));
+        WriteGPR(reg1, tsc >> 32);
+      }
+      return true;
+
     default:
       return false;
   }
@@ -1382,6 +1397,14 @@ static bool UsesUnsupportedAttributes(void) {
 
 static bool UsesUnsupportedFeatures(const Executor *executor) {
   switch (xed_decoded_inst_get_category(gXedd)) {
+    case XED_CATEGORY_SYSTEM:
+      switch (xed_decoded_inst_get_iform_enum(gXedd)) {
+        case XED_IFORM_RDTSC:
+        case XED_IFORM_RDTSCP:
+          return false;
+        default:
+          return true;
+      }
     case XED_CATEGORY_3DNOW:
     case XED_CATEGORY_MPX:
     case XED_CATEGORY_AES:
@@ -1389,7 +1412,6 @@ static bool UsesUnsupportedFeatures(const Executor *executor) {
     case XED_CATEGORY_RDSEED:
     case XED_CATEGORY_SEGOP:
     case XED_CATEGORY_SYSCALL:
-    case XED_CATEGORY_SYSTEM:
     case XED_CATEGORY_INTERRUPT:
     case XED_CATEGORY_SYSRET:
     case XED_CATEGORY_XSAVE:
