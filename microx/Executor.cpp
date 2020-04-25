@@ -452,11 +452,12 @@ static bool WriteRegisters(const Executor *executor) {
   xed_reg_enum_t pc_reg = XED_REG_INVALID;
   for (auto i = 0UL; i < gUsedRegs.size(); ++i) {
     const auto reg = static_cast<xed_reg_enum_t>(i);
-    if (i == XED_REG_EIP || i == XED_REG_RIP) {
-      pc_reg = reg;
+    if (!gUsedRegs[i]) {
       continue;
     }
-    if (gModifiedRegs.test(i)) {
+    if (i == XED_REG_EIP || i == XED_REG_RIP) {
+      pc_reg = reg;
+    } else if (gModifiedRegs.test(i)) {
       const auto name = xed_reg_enum_t2str(reg);
       const auto size = xed_get_register_width_bits64(reg);
       const auto store_reg = xed_get_largest_enclosing_register(reg);
