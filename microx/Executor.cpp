@@ -802,6 +802,7 @@ static void UpdateFlagsSub(Flags &flags, uintptr_t lhs, uintptr_t rhs,
     WriteGPR(dest_reg,                                                       \
              static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
                                    stringop_inc));                           \
+    gModifiedRegs.set(dest_reg);                                             \
   } while (false)
 
 #define SCAS                                                                 \
@@ -813,14 +814,16 @@ static void UpdateFlagsSub(Flags &flags, uintptr_t lhs, uintptr_t rhs,
     WriteGPR(dest_reg,                                                       \
              static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
                                    stringop_inc));                           \
+    gModifiedRegs.set(dest_reg);                                             \
   } while (false)
 
 #define LODS                                                                 \
   do {                                                                       \
     WriteGPR(reg0, mem0);                                                    \
-    WriteGPR(dest_reg,                                                       \
-             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
+    WriteGPR(src_reg,                                                        \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(src_reg)) +  \
                                    stringop_inc));                           \
+    gModifiedRegs.set(src_reg);                                              \
   } while (false)
 
 #define MOVS                                                                 \
@@ -832,6 +835,8 @@ static void UpdateFlagsSub(Flags &flags, uintptr_t lhs, uintptr_t rhs,
     WriteGPR(dest_reg,                                                       \
              static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
                                    stringop_inc));                           \
+    gModifiedRegs.set(src_reg);                                              \
+    gModifiedRegs.set(dest_reg);                                             \
   } while (false)
 
 #define CMPS                                                                 \
@@ -845,6 +850,8 @@ static void UpdateFlagsSub(Flags &flags, uintptr_t lhs, uintptr_t rhs,
     WriteGPR(dest_reg,                                                       \
              static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(dest_reg)) + \
                                    stringop_inc));                           \
+    gModifiedRegs.set(src_reg);                                              \
+    gModifiedRegs.set(dest_reg);                                             \
   } while (false)
 
 #define REPNE(...)                \
