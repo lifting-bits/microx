@@ -1,4 +1,5 @@
 # microx - a micro execution framework
+
 Microx is a single-instruction "micro execution" framework. Microx enables a program to safely execute an arbitrary x86 or x86-64 instruction. Microx does not take over or require a process context in order to execute an instruction. It is easily embedded within other programs, as exampled by the Python bindings.
 
 The microx approach to safe instruction execution of arbitrary instructions is to require the user of microx to manage machine state. Microx is packaged as a C++ `Executor` class that must be extended. The Python bindings also present a class, `microx.Executor`, that must be extended. A program extending this class must implement methods such as `ReadReg` and `ReadMem`. When supplied with instruction bytes, microx will invoke the class methods in order to pull in the minimal requisite machine state to execute the instruction. After executing the instruction, microx will "report back" the state changes induced by the instruction's execution, again via methods like `WriteReg` and `WriteMem`.
@@ -17,6 +18,9 @@ Microx depends on [Intel's XED](https://intelxed.github.io/) instruction encoder
 
 To compile for Windows you can use MinGW, the following command should work (make sure to adjust for your Python version):
 
-```
-g++ -g -shared Executor.cpp Python.cpp -Lc:\Python37-64\libs -lpython37 -std=c++14 -I.. -I..\third_party\include -Ic:\Python37-64\include -Wno-attributes -lxed -L..\third_party\lib -o microx_core.pyd
+```bash
+g++ -g -shared -DPYTHON_BINDINGS=1 \
+    Executor.cpp Python.cpp \
+    -Lc:\Python37-64\libs -lpython37 -std=c++14 -I.. -I..\third_party\include \
+    -Ic:\Python37-64\include -Wno-attributes -lxed -L..\third_party\lib -o microx_core.pyd
 ```
