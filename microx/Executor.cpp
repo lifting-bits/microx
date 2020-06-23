@@ -27,10 +27,10 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <ucontext.h>
-#endif //_WIN32
+#endif  //_WIN32
 
-#include "microx/Executor.h"
 #include "XED.h"
+#include "microx/Executor.h"
 
 // TODO(ww): These headers really shouldn't be included here at all;
 // the hack in Executor::Executor with PyErr_Occurred should be fixed
@@ -109,10 +109,12 @@ static_assert(8 == sizeof(Flags), "Invalid structure packing of `Flags`.");
 #ifdef _WIN32
 class LockGuard {
  public:
-  LockGuard(CRITICAL_SECTION &lock_) : lock(&lock_) { EnterCriticalSection(lock); }
+  LockGuard(CRITICAL_SECTION &lock_) : lock(&lock_) {
+    EnterCriticalSection(lock);
+  }
   ~LockGuard(void) { LeaveCriticalSection(lock); }
-  LockGuard(const LockGuard&) = delete;
-  LockGuard& operator=(const LockGuard&) = delete;
+  LockGuard(const LockGuard &) = delete;
+  LockGuard &operator=(const LockGuard &) = delete;
 
  private:
   CRITICAL_SECTION *lock;
@@ -122,13 +124,13 @@ class LockGuard {
  public:
   LockGuard(pthread_mutex_t &lock_) : lock(&lock_) { pthread_mutex_lock(lock); }
   ~LockGuard(void) { pthread_mutex_unlock(lock); }
-  LockGuard(const LockGuard&) = delete;
-  LockGuard& operator=(const LockGuard&) = delete;
+  LockGuard(const LockGuard &) = delete;
+  LockGuard &operator=(const LockGuard &) = delete;
 
  private:
   pthread_mutex_t *lock;
 };
-#endif //_WIN32
+#endif  //_WIN32
 
 // 32-bit decoded state.
 static const xed_state_t kXEDState32 = {XED_MACHINE_MODE_LONG_COMPAT_32,
@@ -171,7 +173,7 @@ static struct sigaction gSIGSEGV;
 static struct sigaction gSIGBUS;
 static struct sigaction gSIGFPE;
 static sigjmp_buf gRecoveryTarget;
-#endif //_WIN32
+#endif  //_WIN32
 
 // Flags that must be written back.
 static Flags gWriteBackFlags;
@@ -184,10 +186,13 @@ static Memory gMemory[2];
 // would be nicer).
 #ifdef _WIN32
 static CRITICAL_SECTION gExecutorLock;
-static bool gExecutorLockInitialized = []{ InitializeCriticalSection(&gExecutorLock); return true; }();
+static bool gExecutorLockInitialized = [] {
+  InitializeCriticalSection(&gExecutorLock);
+  return true;
+}();
 #else
 static pthread_mutex_t gExecutorLock = PTHREAD_MUTEX_INITIALIZER;
-#endif //_WIN32
+#endif  //_WIN32
 
 // Returns true if the executor is initialized.
 static bool gIsInitialized = false;
@@ -219,8 +224,9 @@ static bool DecodeInstruction(const uint8_t *bytes, size_t num_bytes,
 static xed_reg_enum_t WidestRegister(const Executor *executor,
                                      xed_reg_enum_t reg) {
   xed_reg_enum_t wreg;
-  wreg = (64 == executor->addr_size) ? xed_get_largest_enclosing_register(reg)
-                                     : xed_get_largest_enclosing_register32(reg);
+  wreg = (64 == executor->addr_size)
+             ? xed_get_largest_enclosing_register(reg)
+             : xed_get_largest_enclosing_register32(reg);
   if (wreg == XED_REG_INVALID) {
     return reg;
   }
@@ -827,13 +833,13 @@ static void UpdateFlagsSub(Flags &flags, uintptr_t lhs, uintptr_t rhs,
     gModifiedRegs.set(dest_reg);                                             \
   } while (false)
 
-#define LODS                                                                 \
-  do {                                                                       \
-    WriteGPR(reg0, mem0);                                                    \
-    WriteGPR(src_reg,                                                        \
-             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(src_reg)) +  \
-                                   stringop_inc));                           \
-    gModifiedRegs.set(src_reg);                                              \
+#define LODS                                                                \
+  do {                                                                      \
+    WriteGPR(reg0, mem0);                                                   \
+    WriteGPR(src_reg,                                                       \
+             static_cast<uint64_t>(static_cast<int64_t>(ReadGPR(src_reg)) + \
+                                   stringop_inc));                          \
+    gModifiedRegs.set(src_reg);                                             \
   } while (false)
 
 #define MOVS                                                                 \
@@ -1366,13 +1372,13 @@ static bool Emulate(const Executor *executor, uintptr_t &next_pc,
       return true;
 
     case XED_IFORM_RDTSCP:
-        WriteGPR(reg2, ReadValue<uint32_t>(XED_REG_TSCAUX));
-        // fall-through
+      WriteGPR(reg2, ReadValue<uint32_t>(XED_REG_TSCAUX));
+      // fall-through
     case XED_IFORM_RDTSC: {
-        uint64_t tsc = ReadValue<uint64_t>(XED_REG_TSC);
-        WriteGPR(reg0, static_cast<uint32_t>(tsc));
-        WriteGPR(reg1, tsc >> 32);
-      }
+      uint64_t tsc = ReadValue<uint64_t>(XED_REG_TSC);
+      WriteGPR(reg0, static_cast<uint32_t>(tsc));
+      WriteGPR(reg1, tsc >> 32);
+    }
       return true;
 
     default:
@@ -1915,7 +1921,7 @@ static void ExecuteNativeAVX(void) {
   gExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;  // TODO(pag): Implement this!
 #else
   gSignal = SIGILL;  // TODO(pag): Implement this!
-#endif //_WIN32
+#endif  //_WIN32
 }
 
 static void ExecuteNativeAVX512(void) {
@@ -1923,7 +1929,7 @@ static void ExecuteNativeAVX512(void) {
   gExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;  // TODO(pag): Implement this!
 #else
   gSignal = SIGILL;  // TODO(pag): Implement this!
-#endif //_WIN32
+#endif  //_WIN32
 }
 
 #ifdef _WIN32
@@ -1934,12 +1940,12 @@ LONG WINAPI VectoredHandler(struct _EXCEPTION_POINTERS *ExceptionInfo) {
 #else
 #define Cip ExceptionInfo->ContextRecord->Eip
 #define Csp ExceptionInfo->ContextRecord->Esp
-#endif //_WIN64
+#endif  //_WIN64
   auto execArea = (uintptr_t)gExecArea;
   if (Cip >= execArea && Cip < execArea + kPageSize) {
     gExceptionCode = ExceptionInfo->ExceptionRecord->ExceptionCode;
     // Emulate the RET
-    Cip = *(uintptr_t*)Csp;
+    Cip = *(uintptr_t *)Csp;
     Csp += sizeof(uintptr_t);
     return EXCEPTION_CONTINUE_EXECUTION;
   } else {
@@ -1954,7 +1960,7 @@ LONG WINAPI VectoredHandler(struct _EXCEPTION_POINTERS *ExceptionInfo) {
   gSignal = sig;
   siglongjmp(gRecoveryTarget, true);
 }
-#endif //_WIN32
+#endif  //_WIN32
 
 }  // namespace
 
@@ -1983,13 +1989,14 @@ bool Executor::Init(void) {
   // register storage) so that we can access them via RIP-relative addressing.
 #ifdef _WIN32
   DWORD dwOldProtect = 0;
-  auto ret = VirtualProtect(gExecArea, kPageSize, PAGE_EXECUTE_READWRITE, &dwOldProtect);
+  auto ret = VirtualProtect(gExecArea, kPageSize, PAGE_EXECUTE_READWRITE,
+                            &dwOldProtect);
   if (!ret) {
 #else
   auto ret = mmap(gExecArea, kPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
   if (MAP_FAILED == gExecArea || gExecArea != ret) {
-#endif //_WIN32
+#endif  //_WIN32
     gExecArea = nullptr;
     return false;
   }
@@ -2003,7 +2010,7 @@ bool Executor::Init(void) {
   gSignalHandler.sa_handler = RecoverFromError;
   gSignalHandler.sa_flags = SA_ONSTACK;
   sigfillset(&(gSignalHandler.sa_mask));
-#endif //_WIN32
+#endif  //_WIN32
 
   gIsInitialized = true;
 
@@ -2056,7 +2063,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
         // A read succeeded and we have computed the maximum fetch length
         break;
       } else {
-        #ifdef PYTHON_BINDINGS
+#ifdef PYTHON_BINDINGS
         // Ignore any exceptions generated by ReadMem
         // If they are not ignored here, they will stack for every iteration
         // of this loop and Python will get angry at us
@@ -2065,7 +2072,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
           // user they are ignored
           PyErr_Clear();
         }
-        #endif
+#endif
       }
     }
 
@@ -2128,7 +2135,8 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
         } else {
 #ifdef _WIN32
           gExceptionCode = 0;
-          auto hExceptionHandler = AddVectoredExceptionHandler(1, VectoredHandler);
+          auto hExceptionHandler =
+              AddVectoredExceptionHandler(1, VectoredHandler);
 
           LoadFPU(this);
           if (has_avx512) {
@@ -2164,7 +2172,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
           sigaction(SIGBUS, &gSIGBUS, nullptr);
           sigaction(SIGSEGV, &gSIGSEGV, nullptr);
           sigaction(SIGFPE, &gSIGFPE, nullptr);
-#endif //_WIN32
+#endif  //_WIN32
         }
 #ifdef _WIN32
         switch (gExceptionCode) {
@@ -2203,7 +2211,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
           default:
             return ExecutorStatus::kErrorExecute;
         }
-#endif //_WIN32
+#endif  //_WIN32
       }
 
       // Done before writing back the registers so that a failure of the
