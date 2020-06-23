@@ -8,7 +8,7 @@ ALL_SRCS := $(shell \
 )
 ALL_LISTFILES := $(shell \
 	find . \
-		-type f
+		-type f \
 		\( -path */third_party/* \) -prune \
 		-o \( -name 'CMakeLists.txt' -o -name '*.cmake' \) \
 		-print \
