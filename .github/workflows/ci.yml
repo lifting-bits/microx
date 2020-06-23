@@ -21,7 +21,10 @@ jobs:
         run: make format
 
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: ["ubuntu-latest", "macos-latest"]
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v2
       - name: build-xed
@@ -31,5 +34,24 @@ jobs:
           mkdir build && cd build
           XED_DIR=../third_party/ cmake ..
           cmake --build .
-      - name: build-py
-        run: python3 setup.py build
+
+  build-py:
+    strategy:
+      matrix:
+        platform: ["ubuntu-latest", "macos-latest"]
+        python:
+          - "3.5"
+          - "3.6"
+          - "3.7"
+          - "3.8"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: build-xed
+        run: ./scripts/bootstrap.sh
+      - uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python }}
+      - name: build
+        run: |
+          python3 setup.py build
