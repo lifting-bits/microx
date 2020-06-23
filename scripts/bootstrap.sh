@@ -13,7 +13,7 @@ function download_and_install_xed()
     pushd "$DIR"/third_party/src
 
     if [[ ! -e xed ]] ; then
-        git clone --depth 1 --single-branch --branch master git@github.com:intelxed/xed.git
+        git clone --depth 1 --single-branch --branch master https://github.com/intelxed/xed.git
     else
         pushd xed
         git pull origin master
@@ -21,7 +21,7 @@ function download_and_install_xed()
     fi;
 
     if [[ ! -e mbuild ]] ; then
-        git clone --depth 1 --single-branch --branch master git@github.com:intelxed/mbuild.git
+        git clone --depth 1 --single-branch --branch master https://github.com/intelxed/mbuild.git
     else
         pushd mbuild
         git pull origin master
