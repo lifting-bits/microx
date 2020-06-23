@@ -19,3 +19,17 @@ jobs:
           sudo pip3 install cmake-format
       - name: format
         run: make format
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: build-xed
+        run: ./scripts/bootstrap.sh
+      - name: build
+        run: |
+          mkdir build && cd build
+          XED_DIR=../third_party/ cmake ..
+          cmake --build .
+      - name: build-py
+        run: python3 setup.py build
