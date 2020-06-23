@@ -6,8 +6,7 @@ find_library(
   LIBXED
   NAMES xed
   PATHS ENV "XED_DIR"
-  PATH_SUFFIXES "lib"
-  REQUIRED
+  PATH_SUFFIXES "lib" REQUIRED
 )
 
 add_library("${PROJECT_NAME}" Executor.cpp)
