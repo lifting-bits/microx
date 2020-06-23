@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  schedule:
+    # run CI every day even if no PRs/merges occur
+    - cron: '0 12 * * *'
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: deps
+        run: |
+          sudo pip3 install cmake-format
+      - name: format
+        run: make format
+
+  build:
+    strategy:
+      matrix:
+        platform: ["ubuntu-latest", "macos-latest"]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: build-xed
+        run: ./scripts/bootstrap.sh
+      - name: build
+        run: |
+          mkdir build && cd build
+          XED_DIR=../third_party/ cmake ..
+          cmake --build .
+
+  build-py:
+    strategy:
+      matrix:
+        platform: ["ubuntu-latest", "macos-latest"]
+        python:
+          - "3.5"
+          - "3.6"
+          - "3.7"
+          - "3.8"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: build-xed
+        run: ./scripts/bootstrap.sh
+      - uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python }}
+      - name: build
+        run: |
+          python3 setup.py build
