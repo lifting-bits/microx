@@ -14,6 +14,27 @@ Microx uses a combination of JIT-based dynamic binary translation and instructio
 
 Microx depends on [Intel's XED](https://intelxed.github.io/) instruction encoder and decoder.
 
+## Building
+
+Microx can be built with CMake.
+
+The CMake build uses `XED_DIR` to locate the XED library and headers.
+
+To use the `third_party` XED build:
+
+```bash
+$ ./scripts/bootstrap.sh
+$ export XED_DIR=$(pwd)/third_party
+```
+
+Then, run a normal CMake build:
+
+```bash
+mkdir build && cd build
+cmake ..
+cmake --build .
+```
+
 ## Compilation on Windows (MinGW)
 
 To compile for Windows you can use MinGW, the following command should work (make sure to adjust for your Python version):

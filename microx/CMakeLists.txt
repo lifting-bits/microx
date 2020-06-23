@@ -5,16 +5,20 @@ project(microx)
 find_library(
   LIBXED
   NAMES xed
-  PATHS ENV "LIBRARY_PATH" REQUIRED
+  PATHS ENV "XED_DIR"
+  PATH_SUFFIXES "lib"
+  REQUIRED
 )
 
 add_library("${PROJECT_NAME}" Executor.cpp)
-target_link_libraries("${PROJECT_NAME}" PRIVATE "${LIBXED}")
 target_include_directories(
   "${PROJECT_NAME}" PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                            $<INSTALL_INTERFACE:include>
 )
 set_target_properties("${PROJECT_NAME}" PROPERTIES PUBLIC_HEADER "include/microx/Executor.h")
+
+target_link_libraries("${PROJECT_NAME}" PRIVATE "${LIBXED}")
+target_include_directories("${PROJECT_NAME}" SYSTEM PRIVATE "$ENV{XED_DIR}/include")
 
 install(
   TARGETS "${PROJECT_NAME}"
