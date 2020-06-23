@@ -1,14 +1,16 @@
 CLANG_FORMAT := clang-format
 ALL_SRCS := $(shell \
-	find src test \
+	find . \
 		-type f \
 		\( -path */third_party/* \) -prune \
 		-o \( -name '*.cpp' -o -name '*.h' \) \
 		-print \
 )
 ALL_LISTFILES := $(shell \
-	find src test cmake \
-		-type f \( -name 'CMakeLists.txt' -o -name '*.cmake' \) \
+	find . \
+		-type f
+		\( -path */third_party/* \) -prune \
+		-o \( -name 'CMakeLists.txt' -o -name '*.cmake' \) \
 		-print \
 )
 
