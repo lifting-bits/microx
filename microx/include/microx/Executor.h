@@ -18,6 +18,7 @@
 #define MICROX_EXECUTOR_H_H_
 
 #include <cstdint>
+#include <cstddef>
 
 namespace microx {
 
