@@ -55,3 +55,10 @@ jobs:
       - name: build
         run: |
           python3 setup.py build
+
+  bdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: bdist
+        runs: make bdist
