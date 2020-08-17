@@ -39,7 +39,7 @@ jobs:
       - name: fixup wheels
         run: |
           for whl in dist/*.whl; do
-            auditwheel repair "${whl}" --plat manylinux2014_x86_64 -w dist/wheel/
+            auditwheel repair "${whl}" --plat manylinux2014_x86_64 -w wheel/
           done
 
       - name: publish
@@ -47,4 +47,4 @@ jobs:
         with:
           user: __token__
           password: ${{ secrets.PYPI_TOKEN }}
-          packages_dir: dist/wheel/
+          packages_dir: wheel/
