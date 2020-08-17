@@ -20,8 +20,8 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, 'pre') || contains(github.ref, 'rc') }}
 
-  pypi:
-    name: upload release to PyPI
+  pypi-linux:
+    name: upload linux wheels to PyPI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -33,8 +33,8 @@ jobs:
       - name: deps
         run: pip3 install auditwheel
 
-      - name: build wheels
-        run: make bdist
+      - name: build linux wheels
+        run: make manylinux
 
       - name: fixup wheels
         run: |
@@ -42,6 +42,36 @@ jobs:
           for whl in dist/*.whl; do
             auditwheel repair "${whl}" --plat manylinux2014_x86_64 -w wheel/
           done
+
+      - name: publish
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_TOKEN }}
+          packages_dir: wheel/
+
+  pypi-macos:
+    strategy:
+      matrix:
+        python:
+          - "3.5"
+          - "3.6"
+          - "3.7"
+          - "3.8"
+    name: upload macOS wheels to PyPI
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: build xed
+        run: ./scripts/bootstrap.sh
+
+      - name: build wheel
+        run: pip wheel . -w wheel/
 
       - name: publish
         uses: pypa/gh-action-pypi-publish@master

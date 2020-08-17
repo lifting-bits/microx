@@ -46,8 +46,8 @@ cmake-format:
 	cmake-format -i $(ALL_LISTFILES)
 	git diff --exit-code
 
-.PHONY: bdist
-bdist:
+.PHONY: manylinux
+manylinux:
 	docker pull $(MANYLINUX_IMAGE)
 	# NOTE(ww): We pass PYTHON through the environment here for the XED
 	# build, which is Python based. The version doesn't matter, as long
