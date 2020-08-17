@@ -15,7 +15,8 @@ microx_core = setuptools.Extension(
     extra_compile_args=["-DPYTHON_BINDINGS=1", "-std=gnu++11", "-g3", "-O0"],
     libraries=["xed"],
     library_dirs=["third_party/lib"],
-    runtime_library_dirs=["third_party/lib"])
+    runtime_library_dirs=["third_party/lib"],
+)
 
 setuptools.setup(
     name="microx",
@@ -26,4 +27,5 @@ setuptools.setup(
     url="https://github.com/trailofbits/microx",
     license="Apache-2.0",
     py_modules=["microx.__init__"],
-    ext_modules=[microx_core])
+    ext_modules=[microx_core],
+)

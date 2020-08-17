@@ -363,10 +363,10 @@ class Memory(object):
             if addr > lowest and lowest - addr > paged_hole:
                 return lowest << self._page_shift
             lowest = addr
-        
+
         if addr < MAX_ADDR and MAX_ADDR - addr > paged_hole:
             return addr << self._page_shift
-        
+
         return None
 
     def find_maps_by_name(self, map_name):
@@ -562,4 +562,3 @@ class Process(Executor):
 
     def write_fpu(self, fpu):
         self._thread.write_fpu(self._ops.convert_to_byte_string(fpu, for_exe=True))
-

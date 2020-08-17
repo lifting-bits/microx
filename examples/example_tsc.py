@@ -40,9 +40,12 @@ if __name__ == "__main__":
             eax = t.read_register("EAX", t.REG_HINT_GENERAL)
             edx = t.read_register("EDX", t.REG_HINT_GENERAL)
             tsc = t.read_register("TSC", t.REG_HINT_NONE)
-            print("Emulating instruction at {:08x} (EAX={:08x}, EDX={:08x}, TSC={:016x})".format(pc, eax, edx, tsc))
+            print(
+                "Emulating instruction at {:08x} (EAX={:08x}, EDX={:08x}, TSC={:016x})".format(
+                    pc, eax, edx, tsc
+                )
+            )
             p.execute(t, 1)
     except Exception as e:
         print(e)
         print(traceback.format_exc())
-

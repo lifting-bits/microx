@@ -18,7 +18,9 @@ if __name__ == "__main__":
     # ret    0x0
     o = microx.Operations()
 
-    code = microx.ArrayMemoryMap(o, 0x100001000, 0x100002000, can_write=False, can_execute=True)
+    code = microx.ArrayMemoryMap(
+        o, 0x100001000, 0x100002000, can_write=False, can_execute=True
+    )
     stack = microx.ArrayMemoryMap(o, 0x200080000, 0x200082000)
 
     code.store_bytes(
@@ -44,4 +46,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(e)
         print(traceback.format_exc())
-

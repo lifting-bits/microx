@@ -52,9 +52,12 @@ if __name__ == "__main__":
             esi = t.read_register("ESI", t.REG_HINT_GENERAL)
             edi = t.read_register("EDI", t.REG_HINT_GENERAL)
             ecx = t.read_register("ECX", t.REG_HINT_GENERAL)
-            print("Emulating instruction at {:08x} (EAX={:08x}, ESI={:08x}, EDI={:08x}, ECX={:08x})".format(pc, eax, esi, edi, ecx))
+            print(
+                "Emulating instruction at {:08x} (EAX={:08x}, ESI={:08x}, EDI={:08x}, ECX={:08x})".format(
+                    pc, eax, esi, edi, ecx
+                )
+            )
             p.execute(t, 1)
     except Exception as e:
         print(e)
         print(traceback.format_exc())
-

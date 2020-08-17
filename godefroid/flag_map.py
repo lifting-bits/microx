@@ -1,6 +1,7 @@
 import microx
 from flags import Flags
 
+
 class MemoryFlags(Flags):
     Read = ()  # can be read
     Write = ()  # can be written

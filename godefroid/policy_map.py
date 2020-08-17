@@ -2,6 +2,7 @@ from flag_map import FlaggedMemoryMap, PolicyFlags
 import sys
 import copy
 
+
 class PolicyMemoryMap(FlaggedMemoryMap):
     def __init__(self, ops, base, limit, access_flags, policy, mapname=None):
         super(PolicyMemoryMap, self).__init__(ops, base, limit, access_flags, mapname)
@@ -12,10 +13,14 @@ class PolicyMemoryMap(FlaggedMemoryMap):
     def __deepcopy__(self, memo):
         # We do not want to copy access maps
         # and want to do a shallow copy of _data
-        cp = PolicyMemoryMap(self._ops, self._base, self._limit,
+        cp = PolicyMemoryMap(
+            self._ops,
+            self._base,
+            self._limit,
             self._access_flags,
             copy.deepcopy(self._policy, memo),
-            self.get_name())
+            self.get_name(),
+        )
         cp._data = self._data[:]
 
         return cp
