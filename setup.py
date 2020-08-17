@@ -5,11 +5,14 @@ import os
 import setuptools
 import sys
 
-if sys.version_info < (3, 5):
-    print("Microx is only supported on Python 3.5 and above.")
+if sys.version_info < (3, 6):
+    print("Microx is only supported on Python 3.6 and above.")
     exit(1)
 
 here = os.path.dirname(__file__)
+
+with open(os.path.join(here, "README.md")) as f:
+    README = f.read()
 
 with open(os.path.join(here, "VERSION")) as f:
     VERSION = f.read().strip()
@@ -28,6 +31,8 @@ setuptools.setup(
     name="microx",
     version=VERSION,
     description="x86 and x86_64 micro-executor.",
+    long_description=README,
+    long_description_content_type="text/markdown",
     author="Peter Goodman",
     author_email="peter@trailofbits.com",
     url="https://github.com/trailofbits/microx",
