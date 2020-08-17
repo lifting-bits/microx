@@ -38,6 +38,7 @@ jobs:
 
       - name: fixup wheels
         run: |
+          # NOTE(ww): --plat here MUST be kept up to date with the Makefile.
           for whl in dist/*.whl; do
             auditwheel repair "${whl}" --plat manylinux2014_x86_64 -w wheel/
           done

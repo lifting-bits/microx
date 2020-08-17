@@ -1,3 +1,5 @@
+# NOTE(ww): Make sure to update the platform tag in .github/workflows/release.yml
+# if you update this image. The two MUST remain in sync to ensure correct wheel builds.
 MANYLINUX_IMAGE := quay.io/pypa/manylinux2014_x86_64
 CLANG_FORMAT := clang-format
 ALL_PY_SRCS := $(shell \
