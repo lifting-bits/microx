@@ -26,12 +26,25 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - uses: actions/setup-python@v1
+        with:
+          python-version: "3.8"
+
+      - name: deps
+        run: pip3 install auditwheel
+
       - name: build wheels
         run: make bdist
+
+      - name: fixup wheels
+        run: |
+          for whl in dist/*.whl; do
+            auditwheel repair "${whl}" --plat manylinux2014_x86_64 -w dist/wheel/
+          done
 
       - name: publish
         uses: pypa/gh-action-pypi-publish@master
         with:
           user: __token__
           password: ${{ secrets.PYPI_TOKEN }}
-          packages_dir: dist/
+          packages_dir: dist/wheel/
