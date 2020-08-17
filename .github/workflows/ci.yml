@@ -60,5 +60,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
       - name: bdist
-        runs: make bdist
+        run: make bdist
