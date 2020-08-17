@@ -58,6 +58,9 @@ bdist:
 		/io/scripts/bootstrap.sh
 	docker run \
 		--rm -v $(shell pwd):/io $(MANYLINUX_IMAGE) \
+		/opt/python/cp35-cp35m/bin/pip wheel /io -w /io/dist
+	docker run \
+		--rm -v $(shell pwd):/io $(MANYLINUX_IMAGE) \
 		/opt/python/cp36-cp36m/bin/pip wheel /io -w /io/dist
 	docker run \
 		--rm -v $(shell pwd):/io $(MANYLINUX_IMAGE) \

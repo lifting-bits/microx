@@ -5,8 +5,8 @@ import os
 import setuptools
 import sys
 
-if sys.version_info < (3, 6):
-    print("Microx is only supported on Python 3.6 and above.")
+if sys.version_info < (3, 5):
+    print("Microx is only supported on Python 3.5 and above.")
     exit(1)
 
 here = os.path.dirname(__file__)
