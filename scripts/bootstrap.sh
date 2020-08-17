@@ -4,7 +4,7 @@ set -euo pipefail
 
 # microx git repo root directory
 DIR="$( dirname "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )" )"
-PYTHON="${PYTHON:-/usr/bin/env/python3}"
+PYTHON="${PYTHON:-/usr/bin/env python3}"
 XED_MFILE_FLAGS="${XED_MFILE_FLAGS-"--static"}"
 export CC="${CC:-$(command -v cc)}"
 export CXX="${CXX:-$(command -v c++)}"
