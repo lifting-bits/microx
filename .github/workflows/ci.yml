@@ -55,6 +55,7 @@ jobs:
       - name: build
         run: |
           python3 setup.py build
+          pip wheel . -w wheel/
 
   manylinux:
     runs-on: ubuntu-latest
