@@ -14,19 +14,22 @@ from enum import Enum, auto
 import cle
 import copy
 
+
 class Icount(Enum):
     INFINITE = auto()
     COUNTED = auto()
 
 
 class GodefroidRunner(object):
-    def __init__(self,
-            memory,
-            initial_pc,
-            initial_sp,
-            max_insts,
-            run_length=Icount.COUNTED,
-            magic_return=0xFEEDF00D):
+    def __init__(
+        self,
+        memory,
+        initial_pc,
+        initial_sp,
+        max_insts,
+        run_length=Icount.COUNTED,
+        magic_return=0xFEEDF00D,
+    ):
 
         assert run_length == Icount.INFINITE or max_insts > 0
 
@@ -36,7 +39,7 @@ class GodefroidRunner(object):
         self.max_insts = max_insts
         self.run_length = run_length
         self.magic_return = magic_return
-    
+
     def make_new_process(self, mem):
         p = GodefroidProcess(mem._ops, mem, self.i_sp)
         # write our "magic return address" to the stack
@@ -47,9 +50,13 @@ class GodefroidRunner(object):
             # Write our magic return on the stack without triggering a policy
             stack.store_bytes_raw(
                 p._initial_sp,
-                self.magic_return.to_bytes(p._memory.address_size_bits() // 8, byteorder="little"),
+                self.magic_return.to_bytes(
+                    p._memory.address_size_bits() // 8, byteorder="little"
+                ),
             )
-            sys.stdout.write(f"[+] Using fake return address of {self.magic_return:08x}\n")
+            sys.stdout.write(
+                f"[+] Using fake return address of {self.magic_return:08x}\n"
+            )
 
         return p
 
@@ -60,7 +67,7 @@ class GodefroidRunner(object):
 
             sys.stdout.write(f"[+] Attempting iteration {itercount}/{iterations}\n")
 
-            #TODO(artem): This is really slow. Should be implemented as some kind of CoW semantics
+            # TODO(artem): This is really slow. Should be implemented as some kind of CoW semantics
             # or at least provide a way to 'reset' to a clean state
             proc = self.make_new_process(copy.deepcopy(self._memory))
 
@@ -73,7 +80,10 @@ class GodefroidRunner(object):
 
             instruction_count = 0
             try:
-                while self.run_length == Icount.INFINITE or instruction_count < self.max_insts:
+                while (
+                    self.run_length == Icount.INFINITE
+                    or instruction_count < self.max_insts
+                ):
                     pc_bytes = t.read_register("EIP", t.REG_HINT_PROGRAM_COUNTER)
                     pc = proc._ops.convert_to_integer(pc_bytes)
                     if self.magic_return is not None and self.magic_return == pc:
@@ -84,7 +94,9 @@ class GodefroidRunner(object):
                         proc.execute(t, 1)
                         instruction_count += 1
             except InstructionFetchError as efe:
-                sys.stdout.write(f"[!] Could not fetch instruction at: {pc:08x}. Error msg: {repr(efe)}.\n")
+                sys.stdout.write(
+                    f"[!] Could not fetch instruction at: {pc:08x}. Error msg: {repr(efe)}.\n"
+                )
             except Exception as e:
                 print(e)
                 print(traceback.format_exc())
@@ -93,21 +105,25 @@ class GodefroidRunner(object):
             return_dict[itercount] = (instruction_count, proc)
         return return_dict
 
+
 class GodefroidProcess(microx.Process):
     INPUT_SPACE_SIZE = 0x1080000
+
     def __init__(self, ops, memory, sp_value=None):
         super(GodefroidProcess, self).__init__(ops, memory)
 
-        #NOTE(artem): Allows for user-specified input heaps
+        # NOTE(artem): Allows for user-specified input heaps
         if not memory.find_maps_by_name("[input_space]"):
             input_size = GodefroidProcess.INPUT_SPACE_SIZE
             input_base = memory.find_hole(input_size)
 
-            sys.stdout.write(f"[+] Mapping input space to: {input_base:08x} - {input_base+input_size:08x}\n")
+            sys.stdout.write(
+                f"[+] Mapping input space to: {input_base:08x} - {input_base+input_size:08x}\n"
+            )
             input_space = PolicyMemoryMap(
                 self._ops,
                 input_base,
-                input_base+input_size,
+                input_base + input_size,
                 MemoryFlags.Read | MemoryFlags.Write,
                 DefaultMemoryPolicy(),  # DefaultPolicy is only temporary, see below
                 mapname="[input_space]",
@@ -133,7 +149,7 @@ class GodefroidProcess(microx.Process):
         assert stack.base() <= function_stack_start < stack.limit()
 
         # assumes stacks grow down
-        #TODO(artem): Support multiple input spaces in InputMemoryPolicy
+        # TODO(artem): Support multiple input spaces in InputMemoryPolicy
         input_policy = InputMemoryPolicy(
             memory.address_size_bits(),
             (function_stack_start, stack.limit()),  # argument space
@@ -174,43 +190,47 @@ class GodefroidProcess(microx.Process):
 
         mem_map = None
         for section in sections:
-            start = section['start']
-            size = section['size']
-            flags = section['flags']
-            name = section['name']
-            content = section['content']
-            #sys.stdout.write(f"[+] Processing section {name}\n")
+            start = section["start"]
+            size = section["size"]
+            flags = section["flags"]
+            name = section["name"]
+            content = section["content"]
+            # sys.stdout.write(f"[+] Processing section {name}\n")
 
             page_start = start & ~(0xFFF)
             page_end = (start + size + 0xFFF) & ~0xFFF
             if "[stack]" == name:
-                sys.stdout.write(f"[+] Creating stack region from 0x{page_start:x} to 0x{page_end:x}. Flags: {flags}\n")
-                mem_map = PolicyMemoryMap(o,
-                    page_start,
-                    page_end,
-                    flags,
-                    DefaultMemoryPolicy(),
-                    mapname=name)
+                sys.stdout.write(
+                    f"[+] Creating stack region from 0x{page_start:x} to 0x{page_end:x}. Flags: {flags}\n"
+                )
+                mem_map = PolicyMemoryMap(
+                    o, page_start, page_end, flags, DefaultMemoryPolicy(), mapname=name
+                )
                 m.add_map(mem_map)
             else:
                 for page in range(page_start, page_end, 0x1000):
                     if not m.can_read(page):
-                        sys.stdout.write(f"[+] Mapping page from 0x{page:x} to 0x{page+0x1000:x}. Flags: {flags}\n")
-                        mem_map = PolicyMemoryMap(o,
+                        sys.stdout.write(
+                            f"[+] Mapping page from 0x{page:x} to 0x{page+0x1000:x}. Flags: {flags}\n"
+                        )
+                        mem_map = PolicyMemoryMap(
+                            o,
                             page,
-                            page+0x1000,
+                            page + 0x1000,
                             flags,
                             DefaultMemoryPolicy(),
-                            mapname=name)
+                            mapname=name,
+                        )
 
                         m.add_map(mem_map)
 
             if content:
                 assert mem_map is not None
-                #sys.stdout.write(f"[+] Writing 0x{len(content):x} bytes at 0x{start:x}\n")
+                # sys.stdout.write(f"[+] Writing 0x{len(content):x} bytes at 0x{start:x}\n")
                 mem_map.store_bytes_raw(start, content)
 
         return m
+
 
 def default_example():
 
@@ -226,19 +246,20 @@ def default_example():
     # 22 f:  c2 00 00                ret    0x0
 
     sections = [
-        {'name' : ".text",
-         "start": 0x1000,
-         "size" : 0x1000,
-         "flags": MemoryFlags.Read | MemoryFlags.Execute,
-         "content": b"\x55\x89\xE5\x51\x8B\x45\x08\x8A\x08\x88\x4D\xFF\x89\xEC\x5D\xC2\x00\x00",
-         },
-
-        {'name' : "[stack]",
-         "start": 0x80000,
-         "size" : 0x82000,
-         "flags": MemoryFlags.Read | MemoryFlags.Write,
-         "content":  None,
-         }
+        {
+            "name": ".text",
+            "start": 0x1000,
+            "size": 0x1000,
+            "flags": MemoryFlags.Read | MemoryFlags.Execute,
+            "content": b"\x55\x89\xE5\x51\x8B\x45\x08\x8A\x08\x88\x4D\xFF\x89\xEC\x5D\xC2\x00\x00",
+        },
+        {
+            "name": "[stack]",
+            "start": 0x80000,
+            "size": 0x82000,
+            "flags": MemoryFlags.Read | MemoryFlags.Write,
+            "content": None,
+        },
     ]
 
     m = GodefroidProcess.create_memory_from_sections(sections)
@@ -257,7 +278,9 @@ def make_stack_section(loaded):
         # Align loaded.max_addr to page alignment (on x86)
         new_section["start"] = ((loaded.max_addr + 0xFFF) & ~0xFFF) + 0x40000
     else:
-        sys.stdout.write(f"[!] Could not find a {STACK_SIZE:x} hole for stack. Aborting.\n")
+        sys.stdout.write(
+            f"[!] Could not find a {STACK_SIZE:x} hole for stack. Aborting.\n"
+        )
         return None
 
     new_section["name"] = "[stack]"
@@ -267,9 +290,8 @@ def make_stack_section(loaded):
 
     return new_section
 
-def load_sections_from_binary(
-    loader, 
-    cle_binary):
+
+def load_sections_from_binary(loader, cle_binary):
 
     sections = []
 
@@ -283,13 +305,15 @@ def load_sections_from_binary(
         new_section["name"] = section.name
         new_section["start"] = section.min_addr
         new_section["size"] = section.memsize
-        #sys.stdout.write(f"[+] CLE is loading section {section.name} from 0x{section.min_addr:x} to 0x{section.min_addr + section.memsize:x}\n")
+        # sys.stdout.write(f"[+] CLE is loading section {section.name} from 0x{section.min_addr:x} to 0x{section.min_addr + section.memsize:x}\n")
 
         elfseg = cle_binary.find_segment_containing(section.min_addr)
 
         # no segment... use section permissions and hope for the best
         if elfseg is None:
-            sys.stdout.write("[!] WARNING: no ELF segments found.. using section permissions and hoping for the best\n")
+            sys.stdout.write(
+                "[!] WARNING: no ELF segments found.. using section permissions and hoping for the best\n"
+            )
             elfseg = section
 
         new_section["flags"] = MemoryFlags.no_flags
@@ -301,22 +325,18 @@ def load_sections_from_binary(
             new_section["flags"] |= MemoryFlags.Execute
 
         if section.only_contains_uninitialized_data:
-            new_section["content"] = b'\00' * new_section["size"]
+            new_section["content"] = b"\00" * new_section["size"]
         else:
             new_section["content"] = loader.memory.load(
-                new_section["start"], new_section["size"])
-        
-        sections.append(new_section)
+                new_section["start"], new_section["size"]
+            )
 
+        sections.append(new_section)
 
     return sections
 
 
-def run_on_binary(
-        binary,
-        entry,
-        icount_type,
-        maxinst):
+def run_on_binary(binary, entry, icount_type, maxinst):
     """
         binary: path to binary file to load
         entry: name or hex (0x prefixed) of the entrypoint)
@@ -347,7 +367,9 @@ def run_on_binary(
     # zero is technically a valid address, but warn about it
     if int == type(ep):
         if ep == 0:
-            sys.stdout.write("[-] WARNING: Entrypoint is zero! This could be intentional but maybe something is wrong\n")
+            sys.stdout.write(
+                "[-] WARNING: Entrypoint is zero! This could be intentional but maybe something is wrong\n"
+            )
         sys.stdout.write("[+] Entry Point: 0x{ep:x}\n")
     else:
         sym = loaded.find_symbol(ep)
@@ -358,12 +380,13 @@ def run_on_binary(
             ep_addr = sym.rebased_addr
             sys.stdout.write(f"[+] Found [{ep}] at 0x{ep_addr:x}\n")
             ep = ep_addr
-    
+
     if ep < main_binary.min_addr or ep > main_binary.max_addr:
         sys.stdout.write(
             f"[!] Entry point addres f{ep:x} "
             f"is outside the range of the main "
-            f"program binary [f{main_binary.min_addr:x} - f{main_binary.max_addr:x}]\n")
+            f"program binary [f{main_binary.min_addr:x} - f{main_binary.max_addr:x}]\n"
+        )
         return None
 
     sections = load_sections_from_binary(loaded, main_binary)
@@ -379,30 +402,44 @@ def run_on_binary(
     else:
         sys.stdout.write(f"[+] Loaded stack at: {stack_s['start']:x}\n")
         sections.append(stack_s)
-    
+
     m = GodefroidProcess.create_memory_from_sections(sections)
-    r = GodefroidRunner(m, initial_pc=ep, initial_sp=None, max_insts=maxinst, run_length=icount_type)
+    r = GodefroidRunner(
+        m, initial_pc=ep, initial_sp=None, max_insts=maxinst, run_length=icount_type
+    )
     rv = r.run(iterations=1)
     return rv[0]
 
+
 if __name__ == "__main__":
-    
+
     parser = argparse.ArgumentParser()
     group_a = parser.add_mutually_exclusive_group()
-    group_a.add_argument("--default", action="store_true", help="Run the default example")
+    group_a.add_argument(
+        "--default", action="store_true", help="Run the default example"
+    )
     group_b = group_a.add_argument_group()
     group_b.add_argument("--binary", help="Which binary file to load")
-    group_b.add_argument("--entry", help="Address (in hex, 0x prefixed) or symbol at which to start execution")
+    group_b.add_argument(
+        "--entry",
+        help="Address (in hex, 0x prefixed) or symbol at which to start execution",
+    )
     group_c = group_a.add_mutually_exclusive_group()
-    group_c.add_argument("--maxinst", type=int, default=1024, help="How many instrutions to execute")
-    group_c.add_argument("--infinite", action="store_true", help="Execute instructions until time limit is reached")
+    group_c.add_argument(
+        "--maxinst", type=int, default=1024, help="How many instrutions to execute"
+    )
+    group_c.add_argument(
+        "--infinite",
+        action="store_true",
+        help="Execute instructions until time limit is reached",
+    )
 
     args = parser.parse_args()
 
     if args.default:
         sys.stdout.write("[+] Executing the default Godefroid paper example\n")
         instruction_count, p = default_example()
-        
+
     else:
         if not args.binary:
             sys.stdout.write("[!] Please specify a binary file to load\n")
@@ -415,7 +452,7 @@ if __name__ == "__main__":
         if not args.entry:
             sys.stdout.write("[!] Please specify an entry point\n")
             sys.exit(-1)
-    
+
         binary = args.binary
         entrypoint = args.entry
 
@@ -423,21 +460,24 @@ if __name__ == "__main__":
         max_inst = 0
 
         if args.infinite:
-            sys.stdout.write("[+] Running for an INFINITE amount of instructions (or until function return)\n")
+            sys.stdout.write(
+                "[+] Running for an INFINITE amount of instructions (or until function return)\n"
+            )
             icount_type = Icount.INFINITE
         elif args.maxinst < 0:
-            sys.stdout.write(f"[!] Max instruction count must be zero or more. Got {args.maxinst}\n")
+            sys.stdout.write(
+                f"[!] Max instruction count must be zero or more. Got {args.maxinst}\n"
+            )
             sys.exit(1)
         else:
             icount_type = Icount.COUNTED
             max_inst = args.maxinst
-            sys.stdout.write(f"[+] Running for {max_inst} instructions (or function return)\n")
+            sys.stdout.write(
+                f"[+] Running for {max_inst} instructions (or function return)\n"
+            )
 
         result = run_on_binary(
-            binary = binary,
-            entry = entrypoint,
-            icount_type = icount_type,
-            maxinst = max_inst
+            binary=binary, entry=entrypoint, icount_type=icount_type, maxinst=max_inst
         )
 
         if result is None:
@@ -475,4 +515,3 @@ if __name__ == "__main__":
             sys.stdout.write(f"\t{k:08x} - {k+v:08x}\n")
     else:
         sys.stdout.write("[-] No outputs found\n")
-

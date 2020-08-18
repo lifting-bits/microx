@@ -14,6 +14,14 @@ Microx uses a combination of JIT-based dynamic binary translation and instructio
 
 Microx depends on [Intel's XED](https://intelxed.github.io/) instruction encoder and decoder.
 
+## Installing
+
+Microx has Python bindings; you can install them via pip on macOS and Linux:
+
+```bash
+$ pip3 install microx
+```
+
 ## Building
 
 Microx can be built with CMake.

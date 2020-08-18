@@ -1,0 +1,98 @@
+on:
+  push:
+    tags:
+      - 'v*'
+
+name: release
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: ${{ contains(github.ref, 'pre') || contains(github.ref, 'rc') }}
+
+  linux-wheels:
+    name: build linux wheels for PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v1
+        with:
+          python-version: "3.8"
+
+      - name: deps
+        run: pip3 install auditwheel
+
+      - name: build linux wheels
+        run: make manylinux
+
+      - name: fixup wheels
+        run: |
+          # NOTE(ww): --plat here MUST be kept up to date with the Makefile.
+          for whl in dist/*.whl; do
+            auditwheel repair "${whl}" --plat manylinux2014_x86_64 -w wheel/
+          done
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: wheels
+          path: wheel/*.whl
+
+  macos-wheels:
+    strategy:
+      matrix:
+        python:
+          - "3.6"
+          - "3.7"
+          - "3.8"
+    name: build macOS wheels for PyPI
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: build xed
+        run: ./scripts/bootstrap.sh
+
+      - name: deps
+        run: pip install wheel
+
+      - name: build wheel
+        run: pip wheel . -w wheel/
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: wheels
+          path: wheel/*.whl
+
+  publish-wheels:
+    name: upload built wheels
+    runs-on: ubuntu-latest
+    needs: [linux-wheels, macos-wheels]
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions/download-artifact@v2
+        with:
+          name: wheels
+          path: wheel/
+
+      - name: publish
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_TOKEN }}
+          packages_dir: wheel/
