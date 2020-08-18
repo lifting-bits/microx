@@ -47,11 +47,17 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v2
-      - name: build-xed
-        run: ./scripts/bootstrap.sh
+
       - uses: actions/setup-python@v1
         with:
           python-version: ${{ matrix.python }}
+
+      - name: build-xed
+        run: ./scripts/bootstrap.sh
+
+      - name: deps
+        run: pip install wheel
+
       - name: build
         run: |
           python3 setup.py build
