@@ -52,7 +52,6 @@ jobs:
     strategy:
       matrix:
         python:
-          - "3.5"
           - "3.6"
           - "3.7"
           - "3.8"
