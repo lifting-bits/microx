@@ -1,5 +1,7 @@
 # microx - a micro execution framework
 
+![CI](https://github.com/lifting-bits/microx/workflows/CI/badge.svg)
+
 Microx is a single-instruction "micro execution" framework. Microx enables a program to safely execute an arbitrary x86 or x86-64 instruction. Microx does not take over or require a process context in order to execute an instruction. It is easily embedded within other programs, as exampled by the Python bindings.
 
 The microx approach to safe instruction execution of arbitrary instructions is to require the user of microx to manage machine state. Microx is packaged as a C++ `Executor` class that must be extended. The Python bindings also present a class, `microx.Executor`, that must be extended. A program extending this class must implement methods such as `read_register` and `read_memory`. When supplied with instruction bytes, microx will invoke the class methods in order to pull in the minimal requisite machine state to execute the instruction. After executing the instruction, microx will "report back" the state changes induced by the instruction's execution, again via methods like `write_register` and `write_memory`.
