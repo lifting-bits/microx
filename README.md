@@ -24,9 +24,26 @@ Microx has Python bindings; you can install them via pip on macOS and Linux:
 $ pip3 install microx
 ```
 
-## Building
+## Building (Python)
 
-Microx can be built with CMake.
+If we don't supply a Python wheel for your platform, you can build microx yourself. You'll
+need at least Python 3.5.
+
+First, build XED:
+
+```bash
+$ ./scripts/bootstrap.sh
+```
+
+Then, use `setup.py build`:
+
+```bash
+$ setup.py build
+```
+
+## Building (C++)
+
+Microx's C++ library can be built with CMake.
 
 The CMake build uses `XED_DIR` to locate the XED library and headers.
 
@@ -43,15 +60,4 @@ Then, run a normal CMake build:
 mkdir build && cd build
 cmake ..
 cmake --build .
-```
-
-## Compilation on Windows (MinGW)
-
-To compile for Windows you can use MinGW, the following command should work (make sure to adjust for your Python version):
-
-```bash
-g++ -g -shared -DPYTHON_BINDINGS=1 \
-    Executor.cpp Python.cpp \
-    -Lc:\Python37-64\libs -lpython37 -std=c++14 -I.. -I..\third_party\include \
-    -Ic:\Python37-64\include -Wno-attributes -lxed -L..\third_party\lib -o microx_core.pyd
 ```
