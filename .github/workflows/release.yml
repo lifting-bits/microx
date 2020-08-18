@@ -70,6 +70,9 @@ jobs:
       - name: build xed
         run: ./scripts/bootstrap.sh
 
+      - name: deps
+        run: pip install wheel
+
       - name: build wheel
         run: pip wheel . -w wheel/
 
