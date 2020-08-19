@@ -102,8 +102,64 @@ static int Executor_init(PyObject *self_, PyObject *args, PyObject *) {
   return 0;
 }
 
+// A reference to the MicroxError
+static PyObject *MicroxError{nullptr};
+
+// A reference to the InstructionDecodeError
+static PyObject *InstructionDecodeError{nullptr};
+
 // A reference to the InstructionFetchError
 static PyObject *InstructionFetchError{nullptr};
+
+// A reference to the AddressFaultError
+static PyObject *AddressFaultError{nullptr};
+
+// A reference to the UnsupportedError
+static PyObject *UnsupportedError{nullptr};
+
+// Initialize the exception references.
+static bool CreateExceptions(PyObject *microx) {
+  MicroxError = PyErr_NewException("microx_core.MicroxError", nullptr, nullptr);
+  if (nullptr == MicroxError) {
+    return false;
+  }
+  Py_INCREF(MicroxError);
+  PyModule_AddObject(microx, "MicroxError", MicroxError);
+
+  InstructionDecodeError = PyErr_NewException(
+      "microx_core.InstructionDecodeError", MicroxError, nullptr);
+  if (nullptr == InstructionDecodeError) {
+    return false;
+  }
+  Py_INCREF(InstructionDecodeError);
+  PyModule_AddObject(microx, "InstructionDecodeError", InstructionDecodeError);
+
+  InstructionFetchError = PyErr_NewException(
+      "microx_core.InstructionFetchError", MicroxError, nullptr);
+  if (nullptr == InstructionFetchError) {
+    return false;
+  }
+  Py_INCREF(InstructionFetchError);
+  PyModule_AddObject(microx, "InstructionFetchError", InstructionFetchError);
+
+  AddressFaultError =
+      PyErr_NewException("microx_core.AddressFaultError", MicroxError, nullptr);
+  if (nullptr == AddressFaultError) {
+    return false;
+  }
+  Py_INCREF(AddressFaultError);
+  PyModule_AddObject(microx, "AddressFaultError", AddressFaultError);
+
+  UnsupportedError =
+      PyErr_NewException("microx_core.UnsupportedError", MicroxError, nullptr);
+  if (nullptr == UnsupportedError) {
+    return false;
+  }
+  Py_INCREF(UnsupportedError);
+  PyModule_AddObject(microx, "UnsupportedError", UnsupportedError);
+
+  return true;
+}
 
 // Emulate an instruction.
 static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
@@ -129,15 +185,20 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
       return nullptr;
 
     case ExecutorStatus::kErrorDecode:
+      PyErr_SetString(InstructionDecodeError, "Unable to decode instruction.");
+      return nullptr;
+    case ExecutorStatus::kErrorUnsupportedFeatures:
     case ExecutorStatus::kErrorUnsupportedCFI:
     case ExecutorStatus::kErrorUnsupportedStack:
+      PyErr_SetString(UnsupportedError,
+                      "Instruction is not supported by microx.");
+      return nullptr;
     case ExecutorStatus::kErrorExecute:
-      PyErr_SetString(PyExc_RuntimeError,
-                      "Unable to micro-execute instruction.");
+      PyErr_SetString(MicroxError, "Unable to micro-execute instruction.");
       return nullptr;
 
     case ExecutorStatus::kErrorFault:
-      PyErr_SetString(PyExc_RuntimeError,
+      PyErr_SetString(AddressFaultError,
                       "Instruction faulted during micro-execution.");
       return nullptr;
 
@@ -396,7 +457,7 @@ struct module_state {
   PyObject *error;
 };
 
-static struct PyModuleDef gModuleDef = {
+static struct PyModuleDef gMicroxModuleDef = {
     PyModuleDef_HEAD_INIT,
     "microx_core",
     "x86 and x86-64 micro-execution support.",
@@ -412,8 +473,12 @@ PyMODINIT_FUNC PyInit_microx_core(void) {
     return nullptr;
   }
 
-  auto m = PyModule_Create(&gModuleDef);
-  if (!m) {
+  auto microx = PyModule_Create(&gMicroxModuleDef);
+  if (!microx) {
+    return nullptr;
+  }
+
+  if (!CreateExceptions(microx)) {
     return nullptr;
   }
 
@@ -436,18 +501,10 @@ PyMODINIT_FUNC PyInit_microx_core(void) {
   }
 
   Py_INCREF(&gExecutorType);
-  PyModule_AddObject(m, "Executor",
+  PyModule_AddObject(microx, "Executor",
                      reinterpret_cast<PyObject *>(&gExecutorType));
 
-  InstructionFetchError =
-      PyErr_NewException("microx_core.InstructionFetchError", nullptr, nullptr);
-  if (nullptr == InstructionFetchError) {
-    return nullptr;
-  }
-  Py_INCREF(InstructionFetchError);
-  PyModule_AddObject(m, "InstructionFetchError", InstructionFetchError);
-
-  return m;
+  return microx;
 }  // namespace
 
 }  // namespace

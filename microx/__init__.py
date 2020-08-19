@@ -2,11 +2,15 @@
 # Copyright (c) 2019 Trail of Bits, Inc., all rights reserved.
 
 import collections
-import sys
-import struct
-import itertools
 
-from microx_core import Executor  # pylint: disable=no-name-in-module
+from microx_core import Executor
+from microx_core import MicroxError
+from microx_core import (  # noqa: F401
+    InstructionDecodeError,
+    InstructionFetchError,
+    AddressFaultError,
+    UnsupportedError,
+)
 
 LIST_LIKE = (str, bytes, bytearray, tuple, list)
 
@@ -52,7 +56,7 @@ class ProxyOperations(Operations):
         return self._next.convert_to_integer(val, for_exe)
 
 
-class MemoryAccessException(Exception):
+class MemoryAccessException(MicroxError):
     pass
 
 
@@ -298,16 +302,16 @@ class Thread(object):
         self._ops = ops
 
     def read_register(self, reg_name, hint):
-        raise Exception("Abstract")
+        raise NotImplementedError("Abstract")
 
     def write_register(self, reg_name, value):
-        raise Exception("Abstract")
+        raise NotImplementedError("Abstract")
 
     def read_fpu(self):
-        raise Exception("Abstract")
+        raise NotImplementedError("Abstract")
 
     def write_fpu(self, new_fpu_data):
-        raise Exception("Abstract")
+        raise NotImplementedError("Abstract")
 
 
 class EmptyThread(Thread):
