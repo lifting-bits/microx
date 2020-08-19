@@ -190,11 +190,11 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
     case ExecutorStatus::kErrorUnsupportedFeatures:
     case ExecutorStatus::kErrorUnsupportedCFI:
     case ExecutorStatus::kErrorUnsupportedStack:
-      PyErr_SetString(UnsupportedError, "Instruction is not supported by microx.");
+      PyErr_SetString(UnsupportedError,
+                      "Instruction is not supported by microx.");
       return nullptr;
     case ExecutorStatus::kErrorExecute:
-      PyErr_SetString(MicroxError,
-                      "Unable to micro-execute instruction.");
+      PyErr_SetString(MicroxError, "Unable to micro-execute instruction.");
       return nullptr;
 
     case ExecutorStatus::kErrorFault:
