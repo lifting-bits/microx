@@ -30,6 +30,7 @@ enum class ExecutorStatus {
   kGood,
   kErrorNotInitialized,
   kErrorDecode,
+  kErrorUnsupportedFeatures,
   kErrorUnsupportedCFI,
   kErrorUnsupportedStack,
   kErrorExecute,

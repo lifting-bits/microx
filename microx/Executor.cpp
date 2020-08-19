@@ -2086,7 +2086,7 @@ ExecutorStatus Executor::Execute(size_t max_num_executions) {
 
     // Reject some easy-to-reject stuff.
     if (UsesUnsupportedFeatures(this)) {
-      return ExecutorStatus::kErrorExecute;
+      return ExecutorStatus::kErrorUnsupportedFeatures;
     }
 
     // Get only the flags we need. This treats the individual flags as if they
