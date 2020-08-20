@@ -123,7 +123,6 @@ static bool CreateExceptions(PyObject *microx) {
   if (nullptr == MicroxError) {
     return false;
   }
-  Py_INCREF(MicroxError);
   PyModule_AddObject(microx, "MicroxError", MicroxError);
 
   InstructionDecodeError = PyErr_NewException(
@@ -131,7 +130,6 @@ static bool CreateExceptions(PyObject *microx) {
   if (nullptr == InstructionDecodeError) {
     return false;
   }
-  Py_INCREF(InstructionDecodeError);
   PyModule_AddObject(microx, "InstructionDecodeError", InstructionDecodeError);
 
   InstructionFetchError = PyErr_NewException(
@@ -139,7 +137,6 @@ static bool CreateExceptions(PyObject *microx) {
   if (nullptr == InstructionFetchError) {
     return false;
   }
-  Py_INCREF(InstructionFetchError);
   PyModule_AddObject(microx, "InstructionFetchError", InstructionFetchError);
 
   AddressFaultError =
@@ -147,7 +144,6 @@ static bool CreateExceptions(PyObject *microx) {
   if (nullptr == AddressFaultError) {
     return false;
   }
-  Py_INCREF(AddressFaultError);
   PyModule_AddObject(microx, "AddressFaultError", AddressFaultError);
 
   UnsupportedError =
@@ -155,7 +151,6 @@ static bool CreateExceptions(PyObject *microx) {
   if (nullptr == UnsupportedError) {
     return false;
   }
-  Py_INCREF(UnsupportedError);
   PyModule_AddObject(microx, "UnsupportedError", UnsupportedError);
 
   return true;
@@ -230,8 +225,7 @@ static PyObject *Executor_Execute(PyObject *self_, PyObject *args) {
       return nullptr;
   }
 
-  Py_INCREF(Py_True);
-  return Py_True;
+  Py_RETURN_TRUE;
 }
 
 // Python representation for the type of an executor.
@@ -475,11 +469,11 @@ PyMODINIT_FUNC PyInit_microx_core(void) {
 
   auto microx = PyModule_Create(&gMicroxModuleDef);
   if (!microx) {
-    return nullptr;
+    return PyErr_NoMemory();
   }
 
   if (!CreateExceptions(microx)) {
-    return nullptr;
+    return PyErr_NoMemory();
   }
 
   // Initialize the `Executor` type. Easier to manually initialize the various
