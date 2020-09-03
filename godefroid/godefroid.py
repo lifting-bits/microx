@@ -338,10 +338,10 @@ def load_sections_from_binary(loader, cle_binary):
 
 def run_on_binary(binary, entry, icount_type, maxinst):
     """
-        binary: path to binary file to load
-        entry: name or hex (0x prefixed) of the entrypoint)
-        icount_type: infinite (run forever)  or counted (max instructions)
-        maxinst: how many instructions to run (if in counted mode)
+    binary: path to binary file to load
+    entry: name or hex (0x prefixed) of the entrypoint)
+    icount_type: infinite (run forever)  or counted (max instructions)
+    maxinst: how many instructions to run (if in counted mode)
     """
 
     loaded = None
