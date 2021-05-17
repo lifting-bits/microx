@@ -351,7 +351,7 @@ class Memory(object):
         self._memory_maps = collections.defaultdict(MemoryMap)
 
     def find_hole(self, hole_size):
-        """ Finds a hole of size `hole_size` between current mappings """
+        """Finds a hole of size `hole_size` between current mappings"""
 
         paged_hole = hole_size >> self._page_shift
         if 0 == paged_hole:

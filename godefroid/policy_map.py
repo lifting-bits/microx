@@ -141,7 +141,7 @@ class PolicyMemoryMap(FlaggedMemoryMap):
             offset += 1
 
     def store_bytes_raw(self, addr, data):
-        """ Does a store bytes without policy checks """
+        """Does a store bytes without policy checks"""
         return self._store_bytes(addr, data)
 
     def store_bytes(self, addr, data):
