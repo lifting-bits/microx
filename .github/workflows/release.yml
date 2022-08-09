@@ -40,7 +40,7 @@ jobs:
         run: |
           # NOTE(ww): --plat here MUST be kept up to date with the Makefile.
           for whl in dist/*.whl; do
-            auditwheel repair "${whl}" --plat manylinux2014_x86_64 -w wheel/
+            auditwheel repair "${whl}" --plat manylinux_2_28_x86_64 -w wheel/
           done
 
       - uses: actions/upload-artifact@v2
