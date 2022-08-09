@@ -2,12 +2,8 @@
 # Copyright 2019 Trail of Bits, all rights reserved.
 
 import os
-import setuptools
-import sys
 
-if sys.version_info < (3, 7):
-    print("Microx is only supported on Python 3.7 and above.")
-    exit(1)
+import setuptools
 
 here = os.path.dirname(__file__)
 
@@ -39,4 +35,5 @@ setuptools.setup(
     license="Apache-2.0",
     py_modules=["microx.__init__"],
     ext_modules=[microx_core],
+    python_requires=">=3.7"
 )
