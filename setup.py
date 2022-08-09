@@ -35,5 +35,5 @@ setuptools.setup(
     license="Apache-2.0",
     py_modules=["microx.__init__"],
     ext_modules=[microx_core],
-    python_requires=">=3.7"
+    python_requires=">=3.7",
 )
