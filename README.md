@@ -21,13 +21,13 @@ Microx depends on [Intel's XED](https://intelxed.github.io/) instruction encoder
 Microx has Python bindings; you can install them via pip on macOS and Linux:
 
 ```bash
-$ pip3 install microx
+$ python -m pip install microx
 ```
 
 ## Building (Python)
 
 If we don't supply a Python wheel for your platform, you can build microx yourself. You'll
-need at least Python 3.5.
+need at least Python 3.7.
 
 First, build XED:
 
