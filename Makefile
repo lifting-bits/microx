@@ -1,6 +1,6 @@
 # NOTE(ww): Make sure to update the platform tag in .github/workflows/release.yml
 # if you update this image. The two MUST remain in sync to ensure correct wheel builds.
-MANYLINUX_IMAGE := quay.io/pypa/manylinux2014_x86_64
+MANYLINUX_IMAGE := quay.io/pypa/manylinux_2_28_x86_64
 CLANG_FORMAT := clang-format
 ALL_PY_SRCS := $(shell \
 	find . \
@@ -58,10 +58,13 @@ manylinux:
 		/io/scripts/bootstrap.sh
 	docker run \
 		--rm -v $(shell pwd):/io $(MANYLINUX_IMAGE) \
-		/opt/python/cp36-cp36m/bin/pip wheel /io -w /io/dist
-	docker run \
-		--rm -v $(shell pwd):/io $(MANYLINUX_IMAGE) \
 		/opt/python/cp37-cp37m/bin/pip wheel /io -w /io/dist
 	docker run \
 		--rm -v $(shell pwd):/io $(MANYLINUX_IMAGE) \
 		/opt/python/cp38-cp38/bin/pip wheel /io -w /io/dist
+	docker run \
+		--rm -v $(shell pwd):/io $(MANYLINUX_IMAGE) \
+		/opt/python/cp39-cp39/bin/pip wheel /io -w /io/dist
+	docker run \
+		--rm -v $(shell pwd):/io $(MANYLINUX_IMAGE) \
+		/opt/python/cp310-cp310/bin/pip wheel /io -w /io/dist
