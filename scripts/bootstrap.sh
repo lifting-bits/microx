@@ -8,6 +8,7 @@ PYTHON="${PYTHON:-python3}"
 XED_MFILE_FLAGS="${XED_MFILE_FLAGS-"--static"}"
 export CC="${CC:-$(command -v cc)}"
 export CXX="${CXX:-$(command -v c++)}"
+export AR="${AR:-$(command -v ar)}"
 
 function download_and_install_xed()
 {
@@ -37,9 +38,10 @@ function download_and_install_xed()
     "${PYTHON}" ./mfile.py install \
         --install-dir ./microx-kit \
         --extra-flags="-fPIC" \
-        --cc="$CC" \
-        --cxx="$CXX" \
-        $XED_MFILE_FLAGS
+        --ar="${AR}" \
+        --cc="${CC}" \
+        --cxx="${CXX}" \
+        ${XED_MFILE_FLAGS}
 
     rm -rf "$DIR"/third_party/include/xed
     cp -r ./microx-kit/include/xed "$DIR"/third_party/include/
