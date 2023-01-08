@@ -442,7 +442,7 @@ bool PythonExecutor::ReadFPU(FPU &val) const {
 
 bool PythonExecutor::WriteFPU(const FPU &val) const {
   auto ret =
-      PyObject_CallMethod(self, "write_fpu", "(z#)", val.bytes, sizeof(val));
+      PyObject_CallMethod(self, "write_fpu", "(y#)", val.bytes, sizeof(val));
   Py_XDECREF(ret);
   return nullptr != ret;
 }
