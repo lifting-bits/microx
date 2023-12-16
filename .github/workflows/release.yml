@@ -43,7 +43,7 @@ jobs:
             auditwheel repair "${whl}" --plat manylinux_2_28_x86_64 -w wheel/
           done
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: wheels
           path: wheel/*.whl
@@ -74,7 +74,7 @@ jobs:
       - name: build wheel
         run: pip wheel . -w wheel/
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: wheels
           path: wheel/*.whl
